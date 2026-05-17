@@ -1,8 +1,8 @@
-# AgoraFX
+## AgoraFX
 
 **African FX Prediction Markets — powered by an autonomous AI agent on Arc Testnet**
 
-Live at: [agorafx.vercel.app](https://agorafx.vercel.app)
+An autonomous AI agent that monitors real-time USDC/NGN and EURC/USDC rates 24/7, detects strong momentum using Groq + Llama 3.3, and **automatically creates & resolves on-chain prediction markets**.
 
 ---
 
@@ -14,27 +14,28 @@ Users connect a wallet, pick YES or NO, deposit USDC, and earn proportional payo
 
 ---
 
-## How it works
+
+
+## ✨ Key Features
 
 ```
-OKX / Flutterwave          AI Agent (Groq/Llama 3.3)       Arc Testnet
-─────────────────    →    ──────────────────────────    →   ────────────────
-Rate feed every 30s        Detects momentum signals         PredictionMarket.sol
-EURC/USDC + NGN/USDC       Creates market if signal         USDC settlement
-                           Resolves at expiry               Sub-second finality
+- Fully autonomous AI agent (no human intervention for market creation)
+- Real African FX focus (Naira volatility)
+- Built on Arc Testnet (USDC as gas)
+- Live frontend + backend + smart contracts
+
 ```
 
----
+## 📊 Live Demo
+→ [https://agorafx.vercel.app](https://agorafx.vercel.app)
 
-## Stack
 
-| Layer | Tech |
-|-------|------|
-| Smart Contract | Solidity 0.8.20, OpenZeppelin, Arc Testnet |
-| AI Agent | Python, Groq (Llama 3.3 70B), asyncio |
-| Rate Feeds | OKX API (EURC), Flutterwave (NGN) |
-| Backend | FastAPI, SQLite, Oracle Cloud |
-| Frontend | React, ethers.js, Vercel |
+## 🏗️ Tech Stack
+- **Agent**: Python + Groq (Llama 3.3)
+- **Backend**: FastAPI
+- **Smart Contracts**: Solidity (Contracts/)
+- **Frontend**: React + Vercel
+- **Blockchain**: Arc Testnet (Circle)
 
 ---
 
@@ -48,24 +49,12 @@ EURC/USDC + NGN/USDC       Creates market if signal         USDC settlement
 
 ---
 
-## Architecture
-
-```
-agorafx/
-├── agent/
-│   ├── main.py        # Orchestrator — 3 async loops
-│   ├── monitor.py     # Rate polling every 30s
-│   ├── decision.py    # Groq/Llama decision engine (5min)
-│   ├── market.py      # On-chain market creation & resolution
-│   ├── db.py          # SQLite layer
-│   └── config.py      # Environment config
-├── backend/
-│   └── main.py        # FastAPI REST API
-├── contracts/
-│   └── PredictionMarket.sol
-└── frontend/
-    └── src/App.jsx    # React + ethers.js
-```
+### Project Structure
+**agorafx/**
+- **agent/**          # AI agent logic
+- **backend/**        # FastAPI server
+- **Contracts/**      # Solidity contracts
+- **frontend/**       # React app (deployed separately)
 
 ---
 
@@ -110,8 +99,20 @@ uvicorn backend.main:app --host 0.0.0.0 --port 8001
 
 ---
 
+---
+
+## Quick Start (Local)
+```bash
+# Clone & setup
+git clone https://github.com/MusaAis/agorafx.git
+cd agorafx
+
+# See agent/ and backend/ folders for setup
+```
+---
+
 ## Built for
 
-[Agora Agent Hackathon](https://agora.thecanteenapp.com) by The Canteen × Arc — May 2026
+[Agora Agent Hackathon](https://agora.thecanteenapp.com) by The Canteen × Arc × Circle 
 
 Built by [@MusaAis](https://github.com/MusaAis) 
