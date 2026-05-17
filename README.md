@@ -116,3 +116,5 @@ cd agorafx
 [Agora Agent Hackathon](https://agora.thecanteenapp.com) by The Canteen × Arc × Circle 
 
 Built by [@MusaAis](https://github.com/MusaAis) 
+
+## Star the repo if you like the idea! ⭐
