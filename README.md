@@ -118,3 +118,4 @@ cd agorafx
 Built by [@MusaAis](https://github.com/MusaAis) 
 
 ## Star the repo if you like the idea! ⭐
+## Contributions & feedback welcome.
