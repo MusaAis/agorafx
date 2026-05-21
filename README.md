@@ -1,74 +1,119 @@
-## AgoraFX
+# AgoraFX
 
 **African FX Prediction Markets — powered by an autonomous AI agent on Arc Testnet**
 
-An autonomous AI agent that monitors real-time USDC/NGN and EURC/USDC rates 24/7, detects strong momentum using Groq + Llama 3.3, and **automatically creates & resolves on-chain prediction markets**.
+> *"An unverified but architecturally significant hackathon project for the agent economy."*
+> — [The Agent Times](https://theagenttimes.com/articles/builder-ships-agorafx-an-autonomous-agent-for-african-fx-pre-37eca5a1)
+
+An autonomous AI agent that monitors real-time USDC/NGN and EURC/USDC rates 24/7, detects momentum using Groq + Llama 3.3, and **automatically creates and resolves on-chain prediction markets** — with no human intervention.
+
+---
+
+## 📊 Live Stats
+
+| Metric | Value |
+|--------|-------|
+| 🟢 Markets Created | 290 |
+| ✅ Resolution Rate | 99% |
+| 💰 Total Volume (TVL) | $3,164 |
+| 🎯 Total Bets | 1,202 |
+| 👛 Unique Wallets | 108 |
+| ⚡ Agent Uptime | 24/7 |
+
+→ **[Live at agorafx.vercel.app](https://agorafx.vercel.app)**
 
 ---
 
 ## What is AgoraFX?
 
-AgoraFX lets anyone bet on African FX rate movements — USDC/EURC and USDC/NGN — using a fully autonomous AI agent that monitors rates, detects momentum, and creates prediction markets onchain without human intervention.
+AgoraFX lets anyone bet on African FX rate movements — USDC/NGN and EURC/USDC — using a fully autonomous AI agent that monitors rates, detects momentum, and creates prediction markets onchain without human intervention.
 
 Users connect a wallet, pick YES or NO, deposit USDC, and earn proportional payouts from the losing pool when they're right. All settlement happens on Arc with sub-second finality and ~$0.01 gas fees.
 
 ---
 
+## ✨ Features
 
+**Autonomous Agent**
+- AI agent creates and resolves markets 24/7 with no manual intervention
+- Groq/Llama 3.3 detects FX momentum signals every 5 minutes
+- Scheduled fallback markets if no momentum detected
+- Groq API key rotation — automatically switches keys on rate limit
+- 60% prompt optimization to maximize daily token budget
 
-## ✨ Key Features
+**Rate Accuracy**
+- NGN: queries Flutterwave + ExchangeRate API + freeforex simultaneously, picks highest (closest to real Nigerian market rate)
+- EURC/USDC: queries 4 sources simultaneously, uses median to filter outliers
+- Stale rates automatically overridden by fresher sources
 
-```
-- Fully autonomous AI agent (no human intervention for market creation)
-- Real African FX focus (Naira volatility)
-- Built on Arc Testnet (USDC as gas)
-- Live frontend + backend + smart contracts
+**Smart Contracts**
+- Fully on-chain prediction markets with USDC settlement
+- Auto-seeds YES and NO pools on market creation (1 USDC each)
+- 1% protocol fee on winning payouts
+- Autonomous resolution via `resolveMarket()` with final observed rate
 
-```
-
-## 📊 Live Demo
-→ [https://agorafx.vercel.app](https://agorafx.vercel.app)
-
-
-## 🏗️ Tech Stack
-- **Agent**: Python + Groq (Llama 3.3)
-- **Backend**: FastAPI
-- **Smart Contracts**: Solidity (Contracts/)
-- **Frontend**: React + Vercel
-- **Blockchain**: Arc Testnet (Circle)
+**Frontend**
+- Markets tab with live YES/NO odds and multipliers
+- Positions tab — Active / Closed split with Claim All button
+- Real-time Agent Feed with All / Created / Resolved / Hold filters
+- Bet modal with live multiplier and estimated payout calculation
+- Share to X directly from any market card
 
 ---
 
-## Contracts (Arc Testnet)
+## 🏗️ Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Smart Contracts | Solidity on Arc Testnet |
+| AI Agent | Python + Groq (Llama 3.3-70b) |
+| Backend API | FastAPI + SQLite |
+| Frontend | React + Vite + Vercel |
+| Blockchain | Arc Testnet |
+| Settlement | Circle USDC + EURC |
+| Rate Sources | Flutterwave, ExchangeRate API, freeforex, Frankfurter, Coinbase |
+
+---
+
+## 📋 Contracts (Arc Testnet)
 
 | Contract | Address |
 |----------|---------|
 | PredictionMarket | [`0x5Ddf555F6d360203d02Fe1D9be49b13981A732b5`](https://testnet.arcscan.app/address/0x5Ddf555F6d360203d02Fe1D9be49b13981A732b5) |
-| USDC | `0x3600000000000000000000000000000000000000` |
-| EURC | `0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a` |
+| USDC | [`0x3600000000000000000000000000000000000000`](https://testnet.arcscan.app/address/0x3600000000000000000000000000000000000000) |
+| EURC | [`0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a`](https://testnet.arcscan.app/address/0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a) |
+
+Agent wallet: `0xca3B6Cc345e82F063EF61d534cAaA36c20c2b061`
 
 ---
 
-### Project Structure
-**agorafx/**
-- **agent/**          # AI agent logic
-- **backend/**        # FastAPI server
-- **Contracts/**      # Solidity contracts
-- **frontend/**       # React app (deployed separately)
+## 🤖 Agent Architecture
+
+Three async loops running concurrently:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    AgoraFX Agent                        │
+├─────────────────┬───────────────────┬───────────────────┤
+│  Rate Monitor   │  Decision Engine  │  Market Resolver  │
+│  every 30s      │  every 5min       │  every 60s        │
+├─────────────────┼───────────────────┼───────────────────┤
+│ Polls 4 sources │ Feeds rates to    │ Checks expired    │
+│ simultaneously  │ Llama 3.3         │ markets           │
+│                 │                   │                   │
+│ NGN: picks      │ Returns JSON:     │ Calls             │
+│ highest rate    │ create_market     │ resolveMarket()   │
+│                 │ or hold           │ with final rate   │
+│ EURC: median    │                   │                   │
+│ of 4 sources    │ Fallback: creates │ Marks outcome     │
+│                 │ scheduled market  │ YES/NO/VOID       │
+│                 │ if none active    │ in DB             │
+└─────────────────┴───────────────────┴───────────────────┘
+```
 
 ---
 
-## Agent Logic
-
-The AI agent runs three concurrent loops:
-
-- **Rate Monitor (30s):** Polls EURC/USDC from OKX and USDC/NGN from Flutterwave
-- **Decision Engine (5min):** Feeds recent rate history to Llama 3.3, which returns a structured JSON decision on whether to open a market and with what parameters. Falls back to a scheduled market if no momentum is detected and no active market exists
-- **Resolver (60s):** Checks for expired markets and calls `resolveMarket()` with the final observed rate
-
----
-
-## Circle Tools Used
+## 🔄 Circle Tools Used
 
 - **USDC** — settlement token for all bets and payouts
 - **EURC** — primary FX pair (EURC/USDC)
@@ -77,45 +122,102 @@ The AI agent runs three concurrent loops:
 
 ---
 
-## Setup
+## 📁 Project Structure
 
+```
+agorafx/
+├── agent/
+│   ├── main.py          # Orchestrator — 3 async loops
+│   ├── monitor.py       # Rate polling (4 sources, median/max logic)
+│   ├── decision.py      # Groq/Llama market creation logic
+│   ├── market.py        # On-chain contract interaction
+│   ├── db.py            # SQLite layer
+│   └── config.py        # Environment + monitored pairs
+├── backend/
+│   └── main.py          # FastAPI — markets, rates, stats, agent endpoints
+├── contracts/
+│   └── PredictionMarket.sol
+├── frontend/
+│   └── src/
+│       ├── App.jsx      # Main user interface
+│       ├── onchain.js   # ethers.js contract helpers
+│       └── share.js     # X/Twitter sharing
+└── agorafx.db           # SQLite database
+```
+
+---
+
+## ⚙️ Setup
+
+### Prerequisites
 ```bash
-# Install dependencies
-pip install web3 httpx python-dotenv anthropic fastapi uvicorn groq
+pip install web3 httpx python-dotenv fastapi uvicorn groq
+```
 
-# Environment variables (.env)
+### Environment Variables (`.env`)
+```env
 ARC_TESTNET_RPC_URL=https://rpc.testnet.arc.network
 DEPLOYER_PRIVATE_KEY=0x...
 PREDICTION_MARKET_ADDRESS=0x5Ddf555F6d360203d02Fe1D9be49b13981A732b5
-GROQ_API_KEY=...
-FLW_SECRET_KEY=...  # Optional: Flutterwave for NGN rates
+GROQ_API_KEY=gsk_...
+GROQ_API_KEY_2=gsk_...        # Optional: second key for rotation
+FLW_SECRET_KEY=...             # Optional: Flutterwave for NGN rates
+```
+
+### Run
+
+```bash
+# Clone
+git clone https://github.com/MusaAis/agorafx.git
+cd agorafx
 
 # Run agent
 python -m agent.main
 
-# Run API
+# Run API (separate terminal)
 uvicorn backend.main:app --host 0.0.0.0 --port 8001
+
+# Frontend
+cd frontend && npm install && npm run dev
 ```
 
----
-
----
-
-## Quick Start (Local)
+### Production (systemd)
 ```bash
-# Clone & setup
-git clone https://github.com/MusaAis/agorafx.git
-cd agorafx
+# Agent
+sudo systemctl start agorafx
 
-# See agent/ and backend/ folders for setup
+# API
+sudo systemctl start agorafx-api
 ```
+
 ---
 
-## Built for
+## 📈 Traction
 
-[Agora Agent Hackathon](https://agora.thecanteenapp.com) by The Canteen × Arc × Circle 
+- Covered by **The Agent Times** — *"architecturally significant for the agent economy"*
+- Launch post **reposted by @arc official account**
+- **5.6k impressions**, 603 engagements, 77 likes, 13 reposts, 102 link clicks, 7 bookmark 
+- USDC bets from **108 unique wallets**
+- **274 markets** resolved with 99% resolution rate
 
-Built by [@MusaAis](https://github.com/MusaAis) 
+---
 
-## Star the repo if you like the idea! ⭐
-## Contributions & feedback welcome.
+## 🏆 Built For
+
+[Agora Agent Hackathon](https://agora.thecanteenapp.com) by The Canteen × Arc × Circle
+
+---
+
+## 👤 Builder
+
+Built solo by **Musa Ali** — 200-level CS student, Federal University Dutse, Nigeria.
+Founder of [KudiArc](https://kudiarc.xyz)
+
+- X: [@Musa_Ais](https://x.com/Musa_Ais)
+- GitHub: [@MusaAis](https://github.com/MusaAis)
+
+---
+
+⭐ **Star the repo if you find it useful**
+
+Contributions and feedback welcome — open an issue or reach out on X.
