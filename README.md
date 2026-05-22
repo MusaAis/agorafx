@@ -32,6 +32,14 @@ Users connect a wallet, pick YES or NO, deposit USDC, and earn proportional payo
 
 ---
 
+---
+
+## What makes it significant:
+**African traders** have no way to hedge FX volatility between African currencies. Traditional prediction markets ignore African currency pairs entirely.
+**AgoraFX** is the first autonomous agent-driven prediction market focused entirely on **African FX** — running 24/7 with no human intervention, fully on-chain, USDC-settled.
+
+---
+
 ## ✨ Features
 
 **Autonomous Agent**
