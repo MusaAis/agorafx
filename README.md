@@ -13,13 +13,14 @@ An autonomous AI agent that monitors real-time African FX rates 24/7, detects mo
 
 | Metric | Value |
 |--------|-------|
-| 🟢 Markets Created | 628 |
+| 🟢 Markets Created | 971 |
 | ✅ Resolution Rate | 100% |
-| 💰 Total Volume (TVL) | $5,700 |
-| 🎯 Total Bets | 2,883 |
-| 👛 Unique Wallets | 54 |
+| 💰 Total Volume (TVL) | $8,429 |
+| 🎯 Total Bets | 4,820 |
+| 👛 Unique Wallets | 56 |
 | 🌍 Currency Pairs | 6 |
 | ⚡ Agent Uptime | 24/7 |
+| 📜 Decision | 3,335 |
 
 → **[Live at agorafx.vercel.app](https://agorafx.vercel.app)**
 
@@ -244,8 +245,8 @@ None of this exists in circlefin/arc-* repos. Full stack open source.
 
 ## 👤 Builder
 
-Built solo by **Musa Ali** — 20 years old, Nigeria.
-Founder of [KudiArc](https://kudiarc.xyz) — Africa's stablecoin FX desk on Arc.
+Built solo by **Musa Ali** — 20 years old, Nigeria. A CS student at FEDERAL UNIVERSITY DUTSE(FUD).
+Founder of [KudiArc](https://kudiarc.xyz) —  African First stablecoin FX swap & remittance for 10 African countries on Arc.
 
 - X: [@Musa_Ais](https://x.com/Musa_Ais)
 - GitHub: [@MusaAis](https://github.com/MusaAis)
