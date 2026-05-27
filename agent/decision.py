@@ -1,65 +1,167 @@
 """
 Decision Engine — runs every 5 minutes.
-Uses Groq (Llama 3.3) to analyse rate data.
-Fallback: scheduled market alternating EURC/USDC and USDC/NGN.
-"""
-import json, logging
+Forces direction alternation on scheduled markets.      """
+import os                                               import json, logging, time
 from datetime import datetime, timezone
-from groq import AsyncGroq
-from .config import GROQ_API_KEY, DECISION_LOOKBACK
+from groq import AsyncGroq                              import itertools
+
+# ── Groq key rotation ─────────────────────────────────────────────
+def _get_groq_keys():
+    keys = [k for k in [
+        os.environ.get("GROQ_API_KEY"),
+        os.environ.get("GROQ_API_KEY_2"),                       os.environ.get("GROQ_API_KEY_3"),
+    ] if k]
+    return keys                                         
+_key_cycle = None                                       def _next_groq_client():
+    global _key_cycle
+    keys = _get_groq_keys()
+    if not keys:
+        raise ValueError("No Groq API keys found")
+    if _key_cycle is None:
+        _key_cycle = itertools.cycle(keys)
+    return AsyncGroq(api_key=next(_key_cycle))
+from .config import GROQ_API_KEY, DECISION_LOOKBACK, MONITORED_PAIRS
 from .db     import get_recent_rates, insert_decision, get_conn
 
 log = logging.getLogger("decision")
 
-SYSTEM_PROMPT = """You are AgoraFX — an AI agent creating African FX prediction markets on Arc.
+SYSTEM_PROMPT = """You are AgoraFX — an AI agent creating African FX prediction markets on Arc blockchain.
 
-Given recent rate snapshots, decide whether to open a market.
-Only open if there is clear directional momentum ≥0.15%.
+Given rate snapshots, decide whether to open a prediction market.
 
-Respond ONLY with valid JSON:
+Rules:
+- Open ONLY if there is clear directional momentum ≥0.15%
+- Pick the pair with the strongest signal
+- Include confidence 0-100
+
+Respond ONLY with valid JSON, no markdown:
 
 If opening:
-{"action":"create_market","reasoning":"one sentence","pair":"USDC/EURC","question":"Will EURC/USDC exceed 1.085 in the next hour?","threshold":1085000,"is_above":true,"expiry_offset_sec":3600}
+{"action":"create_market","reasoning":"Short reason","pair":"USDC/NGN","question":"Will 1 USDC be worth more than ₦1,371 in the next hour?","threshold":1371000000,"is_above":true,"expiry_offset_sec":3600,"confidence":78}
 
 If not:
-{"action":"hold","reasoning":"one sentence"}
+{"action":"hold","reasoning":"Short reason","confidence":15}
 
-threshold = rate × 1000000 as integer. No markdown."""
+threshold = rate × 1000000 as integer.
 
-
-def _build_prompt(eurc_rates, ngn_rates):
-    now = datetime.now(timezone.utc).isoformat()
-    hints = []
-    if len(eurc_rates)>=2:
-        d=(eurc_rates[-1]["rate"]-eurc_rates[0]["rate"])/eurc_rates[0]["rate"]*100
-        hints.append(f"USDC/EURC change: {d:+.4f}%")
-    if len(ngn_rates)>=2:
-        d=(ngn_rates[-1]["rate"]-ngn_rates[0]["rate"])/ngn_rates[0]["rate"]*100
-        hints.append(f"USDC/NGN change: {d:+.4f}%")
-    return f"""Time: {now}
-Momentum: {chr(10).join(hints) if hints else "Insufficient data"}
-EURC rates: {json.dumps([{"rate":r["rate"],"at":r["recorded_at"]} for r in eurc_rates])}
-NGN rates: {json.dumps([{"rate":r["rate"],"at":r["recorded_at"]} for r in ngn_rates])}
-Should I open a market?"""
+IMPORTANT question formatting:
+- NGN/GHS/KES/ZAR: round to nearest whole number. Example: ₦1,371 not ₦1371.06316
+- EURC/USDC: round to 4 decimal places. Example: 1.1606 not 1.16061662
+- Always use comma thousands separator for fiat amounts"""
 
 
-async def run_decision_cycle():
-    eurc_rates = get_recent_rates("USDC/EURC", DECISION_LOOKBACK)
-    ngn_rates  = get_recent_rates("USDC/NGN",  DECISION_LOOKBACK)
-    if len(eurc_rates)<3 and len(ngn_rates)<3:
-        log.info("Not enough data yet"); return None
+def _last_market_direction(pair: str) -> bool | None:
+    """Returns is_above of last created market for a pair, or None if first."""
+    conn = get_conn()
+    row  = conn.execute(
+        "SELECT is_above FROM markets WHERE pair=? ORDER BY id DESC LIMIT 1", (pair,)
+    ).fetchone()
+    return bool(row["is_above"]) if row else None
+
+
+def _calc_momentum(rates: list) -> float:
+    if len(rates) < 2: return 0.0
+    start = rates[0]["rate"]
+    if start == 0: return 0.0
+    return abs((rates[-1]["rate"] - start) / start * 100)
+
+
+def _build_prompt(all_rates: dict) -> str:
+    """Trimmed prompt — saves ~40% tokens."""
+    now = datetime.now(timezone.utc).strftime("%H:%M UTC")
+    sections = []
+    for pair, rates in all_rates.items():
+        if not rates: continue
+        m   = _calc_momentum(rates)
+        if len(rates) < 2:
+            continue
+        diff  = rates[-1]["rate"] - rates[0]["rate"]
+        trend = "up" if diff > 0 else "down"
+        latest = rates[-1]["rate"]
+        oldest = rates[0]["rate"]
+        # Only send 3 snapshots max instead of 5
+        snaps = [{"r": round(r["rate"], 6), "t": r["recorded_at"][11:16]} for r in rates[-3:]]
+        sections.append(f"{pair} {trend} {m:.3f}% | now={latest} | {snaps}")
+    return f"{now}\n" + "\n".join(sections) + "\nOpen market?"
+
+
+def _insert_decision(pair, action, reasoning, threshold=None, is_above=True, confidence=0):
+    """Insert with confidence — gracefully handles missing column."""
+    conn = get_conn()
     try:
-        client   = AsyncGroq(api_key=GROQ_API_KEY)
-        response = await client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role":"system","content":SYSTEM_PROMPT},
-                {"role":"user","content":_build_prompt(eurc_rates,ngn_rates)},
-            ],
-            max_tokens=300, temperature=0.2,
+        conn.execute(
+            """INSERT INTO decisions (pair, action, reasoning, threshold, is_above, confidence, created_at)
+               VALUES (?,?,?,?,?,?,datetime('now'))""",
+            (pair, action, reasoning, threshold, int(is_above), confidence)
         )
-    except Exception as e:
-        log.error(f"Groq error: {e}"); return None
+    except Exception:
+        # Fallback if confidence column doesn't exist yet
+        conn.execute(
+            """INSERT INTO decisions (pair, action, reasoning, threshold, is_above, created_at)
+               VALUES (?,?,?,?,?,datetime('now'))""",
+            (pair, action, reasoning, threshold, int(is_above))
+        )
+    conn.commit()
+
+
+def _clean_question(decision: dict) -> dict:
+    """Round thresholds and clean question text for readability."""
+    pair      = decision.get("pair", "")
+    threshold = decision.get("threshold", 0)
+    is_above  = decision.get("is_above", True)
+    direction = "more than" if is_above else "less than"
+
+    currency  = pair.split("/")[1] if "/" in pair else ""
+    symbols   = {"NGN": "₦", "GHS": "₵", "KES": "KSh", "ZAR": "R", "EGP": "E£", "TZS": "TSh", "UGX": "USh", "MAD": "MAD "}
+
+    if pair == "USDC/EURC":
+        rate_display = f"{threshold / 1_000_000:.4f}"
+        decision["question"] = f"Will EURC/USDC be {'above' if is_above else 'below'} {rate_display} in the next hour?"
+    elif currency in symbols:
+        rate_int = round(threshold / 1_000_000)
+        sym      = symbols[currency]
+        decision["question"] = f"Will 1 USDC be worth {direction} {sym}{rate_int:,} in the next hour?"
+        # Re-snap threshold to rounded rate
+        decision["threshold"] = rate_int * 1_000_000
+    return decision
+
+
+async def run_decision_cycle() -> dict | None:
+    all_rates = {}
+    any_data  = False
+    for p in MONITORED_PAIRS:
+        rates = get_recent_rates(p["pair"], DECISION_LOOKBACK)
+        all_rates[p["pair"]] = rates
+        if len(rates) >= 3: any_data = True
+
+    if not any_data:
+        log.info("Not enough data yet"); return None
+
+    keys = _get_groq_keys()
+    response = None
+    last_err = None
+    for _ in range(len(keys)):
+        try:
+            client   = _next_groq_client()
+            response = await client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role":"system","content":SYSTEM_PROMPT},
+                    {"role":"user",  "content":_build_prompt(all_rates)},
+                ],
+                max_tokens=150, temperature=0.2,
+            )
+            break  # success
+        except Exception as e:
+            last_err = e
+            if "rate_limit" in str(e).lower() or "429" in str(e):
+                log.warning(f"Groq key limit hit, rotating to next key")
+                continue
+            log.error(f"Groq error: {e}")
+            return None
+    if response is None:
+        log.error(f"All Groq keys exhausted: {last_err}")
+        return None
 
     raw = response.choices[0].message.content.strip()
     if "```" in raw:
@@ -67,57 +169,72 @@ async def run_decision_cycle():
             p=p.strip()
             if p.startswith("json"): p=p[4:].strip()
             if p.startswith("{"): raw=p; break
-    try: decision=json.loads(raw)
-    except Exception as e: log.error(f"JSON parse failed: {e}"); return None
 
-    action,reasoning = decision.get("action","hold"), decision.get("reasoning","")
-    log.info(f"🤖 [{action}] {reasoning}")
-    insert_decision(pair=decision.get("pair","USDC/EURC"),action=action,reasoning=reasoning,
-                    threshold=decision.get("threshold"),is_above=int(bool(decision.get("is_above",True))))
+    try: decision = json.loads(raw)
+    except: log.error("JSON parse failed"); return None
+
+    action     = decision.get("action","hold")
+    reasoning  = decision.get("reasoning","")
+    confidence = min(100, max(0, int(decision.get("confidence",0))))
+
+    log.info(f"🤖 [{action}] {reasoning} (confidence: {confidence}%)")
+
+    _insert_decision(
+        pair=decision.get("pair","USDC/EURC"), action=action,
+        reasoning=reasoning, threshold=decision.get("threshold"),
+        is_above=decision.get("is_above",True), confidence=confidence,
+    )
 
     if action=="create_market":
-        required=["pair","question","threshold","is_above","expiry_offset_sec"]
-        if all(f in decision for f in required): return decision
+        required = ["pair","question","threshold","is_above","expiry_offset_sec"]
+        if all(f in decision for f in required):
+            # Post-process: clean up question formatting
+            decision = _clean_question(decision)
+            return decision
     return None
 
 
-async def build_scheduled_market():
+async def build_scheduled_market() -> dict | None:
     """
-    Fallback: alternates between EURC and NGN markets.
-    Opens a market only if no active market for that pair.
+    Fallback: rotate through all pairs.
+    ALWAYS alternates direction — never creates same direction twice in a row.
     """
     conn = get_conn()
-    # Count active per pair
-    eurc_active = conn.execute(
-        "SELECT COUNT(*) FROM markets WHERE resolved=0 AND pair='USDC/EURC'"
-    ).fetchone()[0]
-    ngn_active = conn.execute(
-        "SELECT COUNT(*) FROM markets WHERE resolved=0 AND pair='USDC/NGN'"
-    ).fetchone()[0]
+    for p in MONITORED_PAIRS:
+        pair   = p["pair"]
+        active = conn.execute(
+            "SELECT COUNT(*) FROM markets WHERE resolved=0 AND pair=?", (pair,)
+        ).fetchone()[0]
+        if active > 0: continue
 
-    # Pick pair with no active market; prefer EURC first
-    if eurc_active==0:
-        pair="USDC/EURC"; rates=get_recent_rates("USDC/EURC",1)
-    elif ngn_active==0:
-        pair="USDC/NGN"; rates=get_recent_rates("USDC/NGN",1)
-    else:
-        log.info("Both pairs have active markets — skipping scheduled market"); return None
+        rates = get_recent_rates(pair, 1)
+        if not rates: continue
 
-    if not rates: log.warning(f"No rate data for {pair}"); return None
+        rate      = rates[0]["rate"]
+        threshold = int(rate * 1_000_000)
 
-    rate      = rates[0]["rate"]
-    threshold = int(rate * 1_000_000)
+        # FORCE alternation — never same direction twice
+        last_dir = _last_market_direction(pair)
+        is_above = (not last_dir) if last_dir is not None else True
 
-    if pair=="USDC/EURC":
-        question = f"Will EURC/USDC be above {rate:.4f} in the next hour?"
-    else:
-        ngn_int = int(rate)
-        question = f"Will 1 USDC be worth more than ₦{ngn_int:,} in the next hour?"
+        currency = pair.split("/")[1]
+        symbols  = {"NGN":"₦","GHS":"₵","KES":"KSh","ZAR":"R","EGP":"E£"}
+        sym      = symbols.get(currency, currency+" ")
 
-    log.info(f"📅 Scheduled market ({pair}): {question}")
-    insert_decision(pair=pair,action="create_market",
-                    reasoning=f"Scheduled {pair} market — no active market for this pair",
-                    threshold=threshold,is_above=1)
-    return {"action":"create_market","pair":pair,"question":question,
-            "threshold":threshold,"is_above":True,"expiry_offset_sec":3600}
+        if pair == "USDC/EURC":
+            dw = "above" if is_above else "below"
+            question = f"Will EURC/USDC be {dw} {rate:.4f} in the next hour?"
+        else:
+            dw = "more than" if is_above else "less than"
+            question = f"Will 1 USDC be worth {dw} {sym}{int(rate):,} in the next hour?"
 
+        direction_str = "↑ above" if is_above else "↓ below"
+        log.info(f" Scheduled {pair} ({direction_str}): {question}")
+
+        _insert_decision(pair=pair, action="create_market",
+                         reasoning=f"Scheduled {pair} market — {direction_str} direction",
+                         threshold=threshold, is_above=is_above, confidence=50)
+
+        return {"action":"create_market","pair":pair,"question":question,
+                "threshold":threshold,"is_above":is_above,"expiry_offset_sec":3600}
+    return None
