@@ -13,14 +13,14 @@ An autonomous AI agent that monitors real-time African FX rates 24/7, detects mo
 
 | Metric | Value |
 |--------|-------|
-| 🟢 Markets Created | 971 |
+| 🟢 Markets Created | 1,469 |
 | ✅ Resolution Rate | 100% |
-| 💰 Total Volume (TVL) | $8,429 |
-| 🎯 Total Bets | 4,820 |
-| 👛 Unique Wallets | 56 |
+| 💰 Total Volume (TVL) | $10,185 |
+| 🎯 Total Bets | 6,172 |
+| 👛 Unique Wallets | 60 |
 | 🌍 Currency Pairs | 6 |
 | ⚡ Agent Uptime | 24/7 |
-| 📜 Decision | 3,335 |
+| 📜 Decision | 4,821 |
 
 → **[Live at agorafx.vercel.app](https://agorafx.vercel.app)**
 
