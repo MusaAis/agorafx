@@ -1,6 +1,6 @@
 # AgoraFX
 
-**African FX Prediction Markets — powered by an autonomous AI agent on Arc Testnet**
+**African FX Prediction Markets — powered by an autonomous AI agent on Arc**
 
 > *"An unverified but architecturally significant hackathon project for the agent economy."*
 > — [The Agent Times](https://theagenttimes.com/articles/builder-ships-agorafx-an-autonomous-agent-for-african-fx-pre-37eca5a1)
@@ -9,18 +9,18 @@ An autonomous AI agent that monitors real-time African FX rates 24/7, detects mo
 
 ---
 
-## 📊 Live Stats
+## 📊 Live Stats — Arc Testnet (June 2026)
 
 | Metric | Value |
 |--------|-------|
-| 🟢 Markets Created | 1,469 |
+| 🟢 Markets Created | 2,369 |
 | ✅ Resolution Rate | 100% |
-| 💰 Total Volume (TVL) | $10,185 |
-| 🎯 Total Bets | 6,172 |
-| 👛 Unique Wallets | 60 |
+| 💰 Total Volume (TVL) | $14,646 |
+| 🎯 Total Bets | 9,683 |
+| 👛 Unique Wallets | 69 |
 | 🌍 Currency Pairs | 6 |
 | ⚡ Agent Uptime | 24/7 |
-| 📜 Decision | 4,821 |
+| 📜 Agent Decisions | 8,032 |
 
 → **[Live at agorafx.vercel.app](https://agorafx.vercel.app)**
 
@@ -38,7 +38,7 @@ Users connect a wallet, pick YES or NO, deposit USDC, and earn proportional payo
 - 🇰🇪 USDC/KES — Kenyan Shilling
 - 🇿🇦 USDC/ZAR — South African Rand
 - 🇪🇬 USDC/EGP — Egyptian Pound
-- 🇪🇺 EURC/USDC — Euro
+- 🇪🇺 EURC/USDC — Euro Stablecoin
 
 ---
 
@@ -48,30 +48,39 @@ Users connect a wallet, pick YES or NO, deposit USDC, and earn proportional payo
 
 **AgoraFX** is the first autonomous agent-driven prediction market focused entirely on **African FX** — running 24/7 with no human intervention, fully on-chain, USDC-settled.
 
+| Problem | Scale |
+|---------|-------|
+| African FX volatility | NGN lost 70%+ vs USD in 2023–2024 |
+| No on-chain African FX markets | Zero prediction markets exist for NGN, GHS, KES, ZAR, EGP |
+| High gas costs on EVM chains | ETH gas makes micro-bet markets unviable — Arc solves this |
+| Opaque price discovery | No transparent on-chain feed for African currency pairs |
+
 ---
 
 ## ✨ Features
 
-**Autonomous Agent**
+### 🤖 Autonomous Agent
 - Creates and resolves markets 24/7 with no manual intervention
 - Groq/Llama 3.3 detects FX momentum signals every 5 minutes
 - Scheduled fallback markets if no momentum detected
 - Groq API key rotation — automatically switches keys on rate limit
 - Monitors 6 African currency pairs simultaneously
+- 8,032 autonomous decisions made to date
 
-**Rate Accuracy**
+### 📡 Rate Accuracy
 - NGN/GHS/KES/ZAR/EGP: queries Flutterwave + ExchangeRate API + freeforex simultaneously
-- NGN: picks highest rate (closest to real Nigerian black market rate)
+- NGN: picks highest rate (closest to real Nigerian parallel market rate)
 - EURC/USDC: queries 4 sources simultaneously, uses median to filter outliers
 - Stale rates automatically overridden by fresher sources
 
-**Smart Contracts**
+### 📜 Smart Contracts
 - Fully on-chain prediction markets with USDC settlement
 - Auto-seeds YES and NO pools on market creation (1 USDC each)
 - 1% protocol fee on winning payouts
 - Autonomous resolution via `resolveMarket()` with final observed rate
+- 2,369 markets created, 100% resolution rate
 
-**Frontend**
+### 🖥️ Frontend
 - Live scrolling ticker showing all 6 FX pairs in real time
 - Markets tab with live YES/NO odds and multipliers
 - Positions tab — Active / Closed split with Claim All button
@@ -93,6 +102,7 @@ Users connect a wallet, pick YES or NO, deposit USDC, and earn proportional payo
 | Blockchain | Arc Testnet (Chain 5042002) |
 | Settlement | Circle USDC + EURC |
 | Rate Sources | Flutterwave, ExchangeRate API, freeforex, Frankfurter, Coinbase |
+| Infrastructure | Oracle Cloud (Ubuntu), systemd, Nginx |
 
 ---
 
@@ -134,14 +144,17 @@ Three async loops running concurrently:
 
 ---
 
-## 🔄 Circle / Arc Tools Used
+## 🔄 Circle / Arc Integration
 
-- **USDC** — settlement token for all bets and payouts
-- **EURC** — primary FX pair (EURC/USDC)
-- **Arc Testnet** — sub-second finality, gas paid in USDC (~$0.01/tx)
-- **Paymaster** — USDC gas fees make high-frequency agent transactions viable
+| Product | Usage |
+|---------|-------|
+| **Circle USDC** | Settlement token for all bets, payouts, and market seeding |
+| **Circle EURC** | Primary FX pair (EURC/USDC) |
+| **Arc Testnet** | Sub-second finality, gas paid in USDC (~$0.01/tx) |
+| **Arc Paymaster** | USDC gas fees make high-frequency agent transactions viable |
+| **Circle Programmable Wallets (UCW)** | Planned — sign-user-transaction flow for in-app wallet betting |
 
-> **Note on Circle UCW:** Circle Programmable Wallets were integrated during development. We got wallet creation, PIN setup, and persistent login working. However, Circle UCW testnet runs on ETH-SEPOLIA — not Arc — making it impossible to sign Arc transactions from Circle wallets today. We're removing it until Circle adds Arc testnet support. [@circle](https://x.com/circle) — this would unlock a whole class of African FX apps.
+> **Note on Circle UCW:** Circle Programmable Wallets are supported on Arc. Integration is planned — implementing the sign-user-transaction flow so users can bet directly from an embedded wallet without MetaMask. This will be the single biggest onboarding improvement for African users.
 
 ---
 
@@ -184,7 +197,7 @@ DEPLOYER_PRIVATE_KEY=0x...
 PREDICTION_MARKET_ADDRESS=0x5Ddf555F6d360203d02Fe1D9be49b13981A732b5
 GROQ_API_KEY=gsk_...
 GROQ_API_KEY_2=gsk_...        # Optional: second key for rotation
-FLW_SECRET_KEY=...             # Optional: Flutterwave for NGN rates
+FLW_SECRET_KEY=...             # Optional: Flutterwave for NGN/GHS/KES/ZAR/EGP rates
 ```
 
 ### Run
@@ -215,13 +228,32 @@ sudo systemctl start agorafx-api
 
 ---
 
+## 🗺️ Roadmap
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| Phase 1 | Autonomous agent — 6 African FX pairs, 24/7 operation | ✅ Complete |
+| Phase 2 | On-chain prediction markets — USDC settlement, auto-resolution | ✅ Complete |
+| Phase 3 | React frontend — ticker, markets, positions, agent feed | ✅ Complete |
+| Phase 4 | Arc Testnet live — 2,369 markets, $14,646 TVL, 100% resolution | ✅ Complete |
+| Phase 5 | Production infrastructure + custom domain | ⏳ Q3 2026 |
+| Phase 6 | Smart contract security audit | ⏳ Q3 2026 |
+| Phase 7 | Arc Mainnet deployment + PostgreSQL | ⏳ Q3-4 2026 |
+| Phase 8 | Circle Programmable Wallets (UCW) integration | 📋 Q4 2026 |
+| Phase 9 | CCTP — cross-chain USDC deposits from Base/Ethereum | 📋 Q4 2026 |
+| Phase 10 | Agent hardening + public analytics dashboard | 📋 Q4 2026 |
+| Phase 11 | More African pairs | 📋 Q1 2027 |
+
+---
+
 ## 📈 Traction
 
 - Covered by **The Agent Times** — *"architecturally significant for the agent economy"*
-- Launch post **reposted by @arc official account** — 6.1K impressions, 81 likes, 13 reposts
-- **628 markets** resolved with 100% resolution rate
-- **54 unique wallets** verified on-chain via contract event logs
-- **$5,700 TVL**, **2,883 total bets**
+- Launch post **reposted by @arc official account** — 7K impressions, 88 likes, 13 reposts
+- **2,369 markets** created autonomously with **100% resolution rate**
+- **$14,646 TVL**, **9,683 total bets**, **69 unique wallets**
+- **8,032 autonomous agent decisions** made to date
+- Agent running continuously 24/7 on Oracle Cloud
 
 ---
 
@@ -245,8 +277,9 @@ None of this exists in circlefin/arc-* repos. Full stack open source.
 
 ## 👤 Builder
 
-Built solo by **Musa Ali** — 20 years old, Nigeria. A CS student at FEDERAL UNIVERSITY DUTSE(FUD).
-Founder of [KudiArc](https://kudiarc.xyz) —  African First stablecoin FX swap & remittance for 10 African countries on Arc.
+Built solo by **Musa Ali** — 20 years old, Nigeria. CS student at Federal University Dutse (FUD).
+
+Founder of [KudiArc](https://kudiarc.xyz) — Africa-first stablecoin FX swap & remittance protocol for 10 African countries on Arc. ($63,800+ swap volume, 27,000+ transactions, 300+ active wallets)
 
 - X: [@Musa_Ais](https://x.com/Musa_Ais)
 - GitHub: [@MusaAis](https://github.com/MusaAis)
