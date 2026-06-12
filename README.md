@@ -9,18 +9,18 @@ An autonomous AI agent that monitors real-time African FX rates 24/7, detects mo
 
 ---
 
-## 📊 Live Stats — Arc Testnet (June 2026)
+## 📊 Live Stats — Arc Testnet (13 June 2026)
 
 | Metric | Value |
 |--------|-------|
-| 🟢 Markets Created | 2,369 |
+| 🟢 Markets Created | 2,483 |
 | ✅ Resolution Rate | 100% |
-| 💰 Total Volume (TVL) | $14,646 |
-| 🎯 Total Bets | 9,683 |
-| 👛 Unique Wallets | 69 |
+| 💰 Total Volume (TVL) | $14,970 |
+| 🎯 Total Bets | 9,988 |
+| 👛 Unique Wallets | 119 |
 | 🌍 Currency Pairs | 6 |
 | ⚡ Agent Uptime | 24/7 |
-| 📜 Agent Decisions | 8,032 |
+| 📜 Agent Decisions | 8,560 |
 
 → **[Live at agorafx.vercel.app](https://agorafx.vercel.app)**
 
@@ -277,9 +277,9 @@ None of this exists in circlefin/arc-* repos. Full stack open source.
 
 ## 👤 Builder
 
-Built solo by **Musa Ali** — 20 years old, Nigeria. CS student at Federal University Dutse (FUD).
+Built solo by **Musa Ali** — CS student at Federal University Dutse (FUD). Culer, PenTester & Dev
 
-Founder of [KudiArc](https://kudiarc.xyz) — Africa-first stablecoin FX swap & remittance protocol for 10 African countries on Arc. ($63,800+ swap volume, 27,000+ transactions, 300+ active wallets)
+Founder of [KudiArc](https://x.com/KudiArc) — Africa-first stablecoin FX swap & remittance protocol for 10 African countries on Arc. ($63,800+ swap volume, 27,000+ transactions, 300+ active wallets)
 
 - X: [@Musa_Ais](https://x.com/Musa_Ais)
 - GitHub: [@MusaAis](https://github.com/MusaAis)
