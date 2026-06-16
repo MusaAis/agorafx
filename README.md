@@ -288,7 +288,7 @@ sudo systemctl start agorafx-api  # backend
 | 6 | Agent budget system + SHA256 decision log | 🔨 Building (Lepton) |
 | 7 | Market Intelligence tab — RFB 06 creator layer | 🔨 Building (Lepton) |
 | 8 | Agent USDC staking — skin in the game per market | 🔨 Building (Lepton) |
-| 9 | Arc Mainnet + PostgreSQL | ⏳ Q3 2026 |
+| 9 | Arc Mainnet + PostgreSQL | ⏳ |
 | 10 | More African pairs (TZS, UGX, MAD) | ⏳ Q3 2026 |
 | 11 | Mobile app | ⏳ Q4 2026 |
 | 12 | Beyond FX — crypto prices, commodities, African stock indices | ⏳ 2027 |
