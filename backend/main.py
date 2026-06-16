@@ -1,16 +1,31 @@
 """
 AgoraFX — FastAPI backend
 """
-from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import sys, os, time, json
+import hashlib
+from datetime import datetime, timedelta
+import base64
+import json
+
+from dotenv import load_dotenv
+load_dotenv()
+from .x402_middleware import build_x402_middleware
+from .x402_middleware import require_x402
+from fastapi import Depends
+from fastapi.responses import JSONResponse
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agent.db import get_conn, init_db
+import logging
+from fastapi import FastAPI, HTTPException, Request
 
-app = FastAPI(title="AgoraFX API", version="1.0.0")
+log = logging.getLogger("backend")
+
+app = FastAPI(title="AgoraFX API", version="2.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+# ─v2─ x402 middleware ───────────────────────────────────────────────────────
 @app.on_event("startup")
 def startup():
     init_db()
@@ -56,6 +71,142 @@ def get_latest_rates():
         row = conn.execute("SELECT * FROM rates WHERE pair=? ORDER BY id DESC LIMIT 1", (pair,)).fetchone()
         result[pair] = dict(row) if row else None
     return result
+
+@app.get("/rates/signal")
+async def get_signal(payer: str = Depends(require_x402)):
+    """
+    x402 paywalled — $0.001 USDC per call.
+    Depends(require_x402) enforces EIP-712 payment before this runs.
+    payer = verified signer address recovered from EIP-712 signature.
+    """
+    import httpx, hashlib, time as _time
+
+    conn = get_conn()
+
+    rows = conn.execute("""
+        SELECT pair, source, rate, recorded_at
+        FROM rates
+        WHERE recorded_at >= datetime('now', '-10 minutes')
+        ORDER BY pair, id DESC
+    """).fetchall()
+
+    if not rows:
+        raise HTTPException(status_code=503, detail="No rate data available")
+
+    pair_data: dict = {}
+    for pair, source, rate, ts in rows:
+        pair_data.setdefault(pair, []).append({"rate": rate, "ts": ts, "source": source})
+
+    best_conf, best_signal = 0.0, {}
+    for pair, points in pair_data.items():
+        if len(points) < 2: continue
+        rates         = [d["rate"] for d in points]
+        latest, oldest = rates[0], rates[-1]
+        change        = abs(latest - oldest) / (oldest or 1)
+        conf          = min(change / 0.015, 0.99)
+        if conf > best_conf:
+            best_conf   = conf
+            best_signal = {
+                "pair":             pair,
+                "source":           points[0]["source"],
+                "rate":             latest,
+                "rate_change_pct":  round(change * 100, 4),
+                "direction":        "UP" if latest > oldest else "DOWN",
+                "confidence":       round(conf, 4),
+                "lookback_points":  len(rates),
+            }
+
+    if not best_signal:
+        raise HTTPException(status_code=503, detail="Insufficient rate history")
+
+    signal_hash = hashlib.sha256(
+        f"{best_signal['pair']}|{best_signal['rate']}|{best_signal['confidence']}".encode()
+    ).hexdigest()
+
+    payload = {
+        **best_signal,
+        "signal_hash": signal_hash,
+        "payer":       payer,           # ← verified signer address from EIP-712
+        "timestamp":   datetime.utcnow().isoformat() + "Z",
+        "x402_version": 1,
+    }
+
+    # ── Facilitator settlement ────────────────────────────────────────────────
+    # Submit the signed EIP-712 authorization to Circle's x402 facilitator
+    facilitator_url = os.getenv(
+        "X402_FACILITATOR_URL",
+        "https://x402.org/facilitate"
+    )
+    settled = False
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                facilitator_url,
+                json={
+                    "x402Version": 1,
+                    "paymentPayload": payload.get("_payment_payload"),  # injected by middleware below
+                },
+            )
+            if resp.status_code == 200:
+                settled = True
+                log.info("x402 facilitator settled: payer=%s", payer)
+            else:
+                log.warning("x402 facilitator %s: %s", resp.status_code, resp.text[:200])
+    except Exception as e:
+        log.warning("x402 facilitator call failed: %s", e)
+
+    # ── Response ──────────────────────────────────────────────────────────────
+    price_units = int(float(os.getenv("X402_SIGNAL_PRICE_USDC", "0.001")) * 1_000_000)
+    settle_hdr  = base64.b64encode(json.dumps(
+        {
+            "success": settled,
+            "payer":   payer,
+            "amount":  str(price_units),
+            "network": "eip155:5042002",
+        },
+        separators=(",", ":")
+    ).encode()).decode()
+
+    response = JSONResponse(content=payload)
+    response.headers["PAYMENT-RESPONSE"]              = settle_hdr
+    response.headers["Access-Control-Expose-Headers"] = "PAYMENT-REQUIRED,PAYMENT-RESPONSE"
+    return response
+
+@app.get("/agent/decisions")
+async def agent_decisions(limit: int = 50, offset: int = 0):
+    """Public audit trail: every PAID / CACHED / HOLD decision the agent made."""
+    conn = get_conn()
+
+    rows = conn.execute(
+        """
+        SELECT reasoning_hash, action, pair, confidence,
+               cost_usdc, rate, spend_date, created_at
+        FROM x402_spend
+        ORDER BY created_at DESC
+        LIMIT ? OFFSET ?
+        """,
+        (limit, offset),
+    ).fetchall()
+
+    cols = ["reasoning_hash", "action", "pair", "confidence",
+            "cost_usdc", "rate", "spend_date", "created_at"]
+    decisions = [dict(zip(cols, r)) for r in rows]
+
+    total_paid = conn.execute(
+        "SELECT COALESCE(SUM(cost_usdc), 0) FROM x402_spend WHERE action='PAID'"
+    ).fetchone()[0]
+
+    paid_count = conn.execute(
+        "SELECT COUNT(*) FROM x402_spend WHERE action='PAID'"
+    ).fetchone()[0]
+
+    return {
+        "decisions":        decisions,
+        "total_paid_usdc":  round(float(total_paid), 6),
+        "paid_count":       int(paid_count),
+        "limit":            limit,
+        "offset":           offset,
+    }
 
 @app.get("/decisions")
 def get_decisions(limit: int = 50):
@@ -319,6 +470,119 @@ def get_bets_summary():
     except Exception:
         yes_count = 0; no_count = 0
     return {"yes_count":yes_count,"no_count":no_count,"total":yes_count+no_count}
+
+# ── Market Bets Endpoint ─────────────────────────────────────────
+
+@app.get("/markets/{market_id_hex}/bets")
+def get_market_bets(market_id_hex: str):
+    """Return all bets for a specific market from user_bets cache."""
+    import sqlite3 as _sqlite3
+    db = _sqlite3.connect(DB_PATH)
+    db.row_factory = _sqlite3.Row
+    try:
+        rows = db.execute(
+            """SELECT wallet, is_yes, SUM(amount) as amount, MAX(block_num) as block_num, tx_hash
+               FROM user_bets WHERE market_id=?
+               GROUP BY wallet, is_yes""",
+            (market_id_hex,)
+        ).fetchall()
+        return [{"wallet": r["wallet"], "side": bool(r["is_yes"]),
+                 "amount": r["amount"], "block_num": r["block_num"],
+                 "tx_hash": r["tx_hash"], "ts": None} for r in rows]
+    finally:
+        db.close()
+
+@app.get("/admin/stuck-markets")
+def get_stuck_markets():
+    """Markets expired on-chain but not resolved in DB."""
+    import time
+    conn = get_conn()
+    rows = conn.execute(
+        """SELECT * FROM markets WHERE resolved=0 AND expiry_ts <= ?
+           ORDER BY expiry_ts ASC""",
+        (int(time.time()),)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+@app.post("/admin/force-resolve/{market_id_hex}")
+def force_resolve_market(market_id_hex: str):
+    """Force-sync a stuck market from on-chain state."""
+    from web3 import Web3
+    from web3.middleware import ExtraDataToPOAMiddleware
+    from agent.config import RPC_URL, CONTRACT_ADDRESS as CA
+    ABI = [{"type":"function","name":"getMarket","inputs":[{"name":"marketId","type":"bytes32"}],
+            "outputs":[{"name":"","type":"tuple","components":[
+                {"name":"id","type":"bytes32"},{"name":"pair","type":"string"},
+                {"name":"question","type":"string"},{"name":"threshold","type":"uint256"},
+                {"name":"isAbove","type":"bool"},{"name":"expiry","type":"uint256"},
+                {"name":"yesPool","type":"uint256"},{"name":"noPool","type":"uint256"},
+                {"name":"outcome","type":"uint8"},{"name":"resolved","type":"bool"},
+                {"name":"createdAt","type":"uint256"}]}],"stateMutability":"view"},
+           {"type":"function","name":"resolveMarket",
+            "inputs":[{"name":"marketId","type":"bytes32"},{"name":"finalRate","type":"uint256"}],
+            "outputs":[],"stateMutability":"nonpayable"}]
+    outcome_map = {0:"UNRESOLVED",1:"YES",2:"NO",3:"VOID"}
+    try:
+        w3 = Web3(Web3.HTTPProvider(RPC_URL))
+        w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+        c = w3.eth.contract(address=Web3.to_checksum_address(CA), abi=ABI)
+        b = bytes.fromhex(market_id_hex.replace("0x",""))
+        m = c.functions.getMarket(b).call()
+        if m[9]:  # already resolved on-chain
+            outcome = outcome_map.get(m[8], "UNKNOWN")
+            conn = get_conn()
+            conn.execute("UPDATE markets SET resolved=1, outcome=? WHERE market_id_hex=?",
+                        (outcome, market_id_hex))
+            conn.commit()
+            return {"ok": True, "outcome": outcome, "source": "onchain_sync"}
+        # Not resolved on-chain yet — agent will handle it
+        return {"ok": False, "reason": "Not yet resolved on-chain — agent will resolve shortly"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/admin/force-resolve-all")
+def force_resolve_all():
+    """Sync all stuck markets from on-chain state at once."""
+    from web3 import Web3
+    from web3.middleware import ExtraDataToPOAMiddleware
+    from agent.config import RPC_URL, CONTRACT_ADDRESS as CA
+    import time
+    ABI = [{"type":"function","name":"getMarket","inputs":[{"name":"marketId","type":"bytes32"}],
+            "outputs":[{"name":"","type":"tuple","components":[
+                {"name":"id","type":"bytes32"},{"name":"pair","type":"string"},
+                {"name":"question","type":"string"},{"name":"threshold","type":"uint256"},
+                {"name":"isAbove","type":"bool"},{"name":"expiry","type":"uint256"},
+                {"name":"yesPool","type":"uint256"},{"name":"noPool","type":"uint256"},
+                {"name":"outcome","type":"uint8"},{"name":"resolved","type":"bool"},
+                {"name":"createdAt","type":"uint256"}]}],"stateMutability":"view"}]
+    outcome_map = {0:"UNRESOLVED",1:"YES",2:"NO",3:"VOID"}
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT market_id_hex FROM markets WHERE resolved=0 AND expiry_ts <= ?",
+        (int(time.time()),)
+    ).fetchall()
+    if not rows:
+        return {"ok": True, "fixed": 0, "message": "No stuck markets"}
+    try:
+        w3 = Web3(Web3.HTTPProvider(RPC_URL))
+        w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+        c = w3.eth.contract(address=Web3.to_checksum_address(CA), abi=ABI)
+        fixed = 0
+        for (mid,) in rows:
+            try:
+                b = bytes.fromhex(mid.replace("0x",""))
+                m = c.functions.getMarket(b).call()
+                if m[9]:
+                    outcome = outcome_map.get(m[8], "UNKNOWN")
+                    conn.execute("UPDATE markets SET resolved=1, outcome=? WHERE market_id_hex=?",
+                                (outcome, mid))
+                    conn.commit()
+                    fixed += 1
+            except Exception:
+                continue
+        return {"ok": True, "fixed": fixed, "total": len(rows)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ── User Positions Cache ──────────────────────────────────────────
 
