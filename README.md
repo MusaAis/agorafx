@@ -5,7 +5,8 @@
 > *"An unverified but architecturally significant hackathon project for the agent economy."*
 > — [The Agent Times](https://theagenttimes.com/articles/builder-ships-agorafx-an-autonomous-agent-for-african-fx-pre-37eca5a1)
 
-> 🔨 **Currently building** — [Lepton Agents Hackathon](https://lepton.thecanteenapp.com) by Canteen × Circle × Arc
+> ** v1 Built for** — [Agora Agent Hackathon](https://agora.thecanteenapp.com) by The Canteen × Arc × Circle
+> 🔨 **Currently building v2** — [Lepton Agents Hackathon](https://lepton.thecanteenapp.com) by Canteen × Circle × Arc
 
 An autonomous AI agent that monitors real-time African FX rates 24/7, detects momentum using Groq + Llama 3.3, and **automatically creates and resolves on-chain prediction markets** — with no human intervention.
 
@@ -17,14 +18,16 @@ An autonomous AI agent that monitors real-time African FX rates 24/7, detects mo
 
 | Metric | Value |
 |--------|-------|
-| 🟢 Markets Created | 2,483 |
+| 🟢 Markets Created | 3,012 |
 | ✅ Resolution Rate | 100% |
 | 💰 Total Volume (TVL) | $14,970 |
 | 🎯 Total Bets | 9,988 |
 | 👛 Unique Wallets | 119 |
 | 🌍 Currency Pairs | 6 |
 | ⚡ Agent Uptime | 24/7 |
-| 📜 Agent Decisions | 8,560 |
+| 📜 Agent Decisions | 9,601 |
+| ⚡ Autonomous x402 Payments | 90+ |
+| 💳 Agent Wallet Balance | $260 USDC |
 
 → **[Live at agorafx.vercel.app](https://agorafx.vercel.app)**
 
@@ -284,8 +287,8 @@ sudo systemctl start agorafx-api  # backend
 | 2 | On-chain prediction markets — USDC settlement, auto-resolution | ✅ Complete |
 | 3 | React frontend — ticker, markets, positions, agent feed | ✅ Complete |
 | 4 | Circle Agent Wallet — agent economic identity on Arc | ✅ Complete (Lepton) |
-| 5 | x402 nanopayments — agent pays per rate fetch, earns per signal sold | 🔨 Building (Lepton) |
-| 6 | Agent budget system + SHA256 decision log | 🔨 Building (Lepton) |
+| 5 | x402 nanopayments — agent pays per rate fetch, 90+ payments made | ✅ Complete (Lepton) |
+| 6 | Agent budget system + SHA256 decision log | ✅ Complete (Lepton) |
 | 7 | Market Intelligence tab — RFB 06 creator layer | 🔨 Building (Lepton) |
 | 8 | Agent USDC staking — skin in the game per market | 🔨 Building (Lepton) |
 | 9 | Arc Mainnet + PostgreSQL | ⏳ |
@@ -300,14 +303,33 @@ sudo systemctl start agorafx-api  # backend
 - 🔨 **Active builder** — Lepton Agents Hackathon (June 15–29, 2026)
 - 📰 Covered by **The Agent Times** — *"architecturally significant for the agent economy"*
 - 📣 Launch post **reposted by @arc official account** — 7.4K impressions, 88 likes, 13 reposts
-- 📊 **2,483 markets** created autonomously, **100% resolution rate**
+- 📊 **3,012 markets** created autonomously, **100% resolution rate**
 - 💰 **$14,970 TVL**, **9,988 total bets**, **119 unique wallets**
-- 🧠 **8,560 autonomous agent decisions** to date
-- ⚡ Agent running continuously 24/7 on Our server
+- 🧠 **9,601 autonomous agent decisions** to date
+- ⚡ **90+ live x402 nanopayments** — agent pays for its own data autonomously
+- 💳 **$260 USDC** in Circle Agent Wallet — agent holds and spends its own money
+- 🔗 Every payment verifiable on [Arc Testnet Explorer](https://testnet.arcscan.app)
 
 ---
 
-## 🏛️ Arc OSS
+## 🐛 x402 Integration — Bugs Documented
+
+Every bug we hit building x402 on Arc is documented here so future builders skip them:
+
+| # | Bug | Fix |
+|---|-----|-----|
+| 1 | x402 SDK `register()` is V2 only | Use `register_v1()` for the protocol |
+| 2 | SDK 2.13.0 reads `requirements.amount` but V1 uses `max_amount_required` | Patch SDK with single `sed` command |
+| 3 | Backend verified EIP-712 but never called Gateway to settle — USDC never moved | Call Gateway settle after signature verification |
+| 4 | Wrong endpoint `/v1/payments/settle` | Correct: `/v1/x402/settle` |
+| 5 | Gateway wants resource as object `{url, description, mimeType}` | Not a plain string |
+| 6 | `maxTimeoutSeconds: 60` rejected by Gateway | Gateway requires minimum 7 days validity |
+| 7 | Python httpx DNS fails inside uvicorn for `gateway-api-testnet.circle.com` | Fix: `asyncio.to_thread` + blocking requests to bypass async resolver |
+| 8 | Heredoc deployment introduced stray `)` | Took 30 mins to find — check heredoc syntax carefully |
+
+---
+
+
 
 AgoraFX exposes four primitives other builders can fork:
 
@@ -322,7 +344,7 @@ None of this exists in circlefin/arc-* repos. Full stack open source.
 
 ## 🏆 Built For
 
-- [Agora Agent Hackathon](https://agora.thecanteenapp.com) — The Canteen × Arc × Circle
+- [Agora Agent Hackathon](https://agora.thecanteenapp.com) — The Canteen × Arc × Circle ✅
 - [Lepton Agents Hackathon](https://lepton.thecanteenapp.com) — Canteen × Circle × Arc 🔨 Active
 
 ---
