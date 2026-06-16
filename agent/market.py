@@ -58,7 +58,7 @@ def _ensure_usdc_approval(w3, usdc, account, amount):
         _send_tx(w3, fn, account)
 
 async def create_market_onchain(decision: dict) -> str | None:
-    """Creates a market then seeds both YES and NO pools with 0.5 USDC each."""
+    """Creates a market then seeds both YES and NO pools with 1 USDC each."""
     w3      = get_w3()
     account = w3.eth.account.from_key(PRIVATE_KEY)
     market_c, usdc_c = get_contracts(w3)
