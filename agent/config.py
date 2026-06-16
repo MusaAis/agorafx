@@ -25,10 +25,6 @@ DECISION_LOOKBACK    = 20
 RATE_SCALE           = 1_000_000
 
 # ── Monitored pairs ───────────────────────────────────────────────
-# Add any pair here — agent will monitor rates and create markets.
-# Format: (pair_name, rate_source, display_name)
-# rate_source options: "okx_eurusdt", "flutterwave_ngn", "exchangerate_ngn",
-#                      "exchangerate_ghs", "exchangerate_kes", "exchangerate_zar"
 MONITORED_PAIRS = [
     {"pair": "USDC/EURC", "source": "okx_eurusdt",     "label": "EURC/USDC"},
     {"pair": "USDC/NGN",  "source": "flutterwave_ngn", "label": "NGN per USDC"},
@@ -37,3 +33,29 @@ MONITORED_PAIRS = [
     {"pair": "USDC/ZAR",  "source": "exchangerate_zar","label": "ZAR per USDC"},
     {"pair": "USDC/EGP",  "source": "exchangerate_egp","label": "EGP per USDC"},
 ]
+
+# ── v2 Circle Agent Wallet ──────────────────────────────────
+CIRCLE_API_KEY              = os.getenv("CIRCLE_API_KEY")
+CIRCLE_ENTITY_SECRET        = os.getenv("CIRCLE_ENTITY_SECRET")       # 64-char hex
+CIRCLE_WALLET_SET_ID        = os.getenv("CIRCLE_WALLET_SET_ID")
+CIRCLE_AGENT_WALLET_ID      = os.getenv("CIRCLE_AGENT_WALLET_ID")
+CIRCLE_AGENT_WALLET_ADDRESS = os.getenv("CIRCLE_AGENT_WALLET_ADDRESS")
+
+AGENT_WALLET_ADDRESS    = CIRCLE_AGENT_WALLET_ADDRESS
+AGENT_WALLET_ID         = CIRCLE_AGENT_WALLET_ID
+
+DAILY_BUDGET_USDC       = float(os.getenv("DAILY_BUDGET_USDC", "10.0"))
+MIN_WALLET_BALANCE_USDC = 0.05
+
+# ── v2: x402 Signal Endpoint ─────────────────────────────────────────
+BACKEND_URL              = os.getenv("BACKEND_URL", "http://localhost:8000")
+X402_FACILITATOR_URL     = os.getenv(
+    "X402_FACILITATOR_URL",
+    "https://facilitator.circle.com"         # Circle's hosted facilitator
+)
+X402_SIGNAL_PRICE_USDC   = float(os.getenv("X402_SIGNAL_PRICE_USDC",  "0.001"))
+X402_ARTICLE_PRICE_USDC  = float(os.getenv("X402_ARTICLE_PRICE_USDC", "0.05"))
+X402_RECEIVER_ADDRESS    = os.getenv(
+    "X402_RECEIVER_ADDRESS",
+    AGENT_WALLET_ADDRESS                     # default: agent pays itself (protocol demo)
+)
