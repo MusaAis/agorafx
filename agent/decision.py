@@ -1,9 +1,14 @@
 """
 Decision Engine — runs every 5 minutes.
-Forces direction alternation on scheduled markets.      """
-import os                                               import json, logging, time
+Forces direction alternation on scheduled markets.
+"""
+
+import os
+import json, logging, time
 from datetime import datetime, timezone
-from groq import AsyncGroq                              import itertools
+from groq import AsyncGroq
+import itertools
+from .x402_client import pay_and_fetch
 
 # ── Groq key rotation ─────────────────────────────────────────────
 def _get_groq_keys():
@@ -12,7 +17,9 @@ def _get_groq_keys():
         os.environ.get("GROQ_API_KEY_2"),                       os.environ.get("GROQ_API_KEY_3"),
     ] if k]
     return keys                                         
-_key_cycle = None                                       def _next_groq_client():
+_key_cycle = None                                       
+
+def _next_groq_client():
     global _key_cycle
     keys = _get_groq_keys()
     if not keys:
@@ -127,6 +134,22 @@ def _clean_question(decision: dict) -> dict:
 
 
 async def run_decision_cycle() -> dict | None:
+    # ── V2: pay for the signal before deciding ────────────────────────
+    signal_result = await pay_and_fetch()
+    _paid_signal: dict = {}
+    if signal_result["action"] == "PAID" and signal_result.get("data"):
+        _paid_signal = signal_result["data"]
+        log.info(
+            "x402 PAID $%.4f — %s %s conf=%.2f hash=%.12s",
+            signal_result["cost_usdc"],
+            _paid_signal.get("pair", "?"),
+            _paid_signal.get("direction", "?"),
+            _paid_signal.get("confidence", 0.0),
+            signal_result["reasoning_hash"],
+        )
+    else:
+        log.info("x402 %s — proceeding with cached rates", signal_result["action"])
+
     all_rates = {}
     any_data  = False
     for p in MONITORED_PAIRS:
