@@ -6,7 +6,7 @@
 > — [The Agent Times](https://theagenttimes.com/articles/builder-ships-agorafx-an-autonomous-agent-for-african-fx-pre-37eca5a1)
 
 > 🏆 **Standout Winner** — [Agora Agent Hackathon](https://agora.thecanteenapp.com) by The Canteen × Arc × Circle
-> 🔨 **Currently building v2** — [Lepton Agents Hackathon](https://lepton.thecanteenapp.com) by Canteen × Circle × Arc
+> 🔨 **Currently building** — [Lepton Agents Hackathon](https://lepton.thecanteenapp.com) by Canteen × Circle × Arc
 
 An autonomous AI agent that monitors real-time African FX rates 24/7, detects momentum using Groq + Llama 3.3, and **automatically creates and resolves on-chain prediction markets** — with no human intervention.
 
@@ -14,20 +14,22 @@ An autonomous AI agent that monitors real-time African FX rates 24/7, detects mo
 
 ---
 
-## 📊 Live Stats — Arc Testnet (June 2026)
+## 📊 Live Stats — Arc Testnet (June 17, 2026)
 
 | Metric | Value |
 |--------|-------|
-| 🟢 Markets Created | 3,012 |
+| 🟢 Markets Created | 3,076+ |
 | ✅ Resolution Rate | 100% |
-| 💰 Total Volume (TVL) | $14,970 |
-| 🎯 Total Bets | 9,988 |
-| 👛 Unique Wallets | 119 |
+| 💰 Total Volume (TVL) | $16,528 |
+| 👛 Unique Wallets | 123 |
 | 🌍 Currency Pairs | 6 |
 | ⚡ Agent Uptime | 24/7 |
-| 📜 Agent Decisions | 9,601 |
+| 📜 Agent Decisions | 9,885+ |
 | ⚡ Autonomous x402 Payments | 90+ |
 | 💳 Agent Wallet Balance | $260 USDC |
+| 📰 Analyst Articles Live | 1 |
+| 👁️ Article Reads | 5 |
+| 💸 Total Analyst Earned | $0.16 USDC |
 
 → **[Live at agorafx.vercel.app](https://agorafx.vercel.app)**
 
@@ -138,7 +140,7 @@ AgoraFX is the first micro-payment layer for African FX intelligence — where a
 | Contract | Address |
 |----------|---------|
 | PredictionMarket v1 | [`0x5Ddf555F6d360203d02Fe1D9be49b13981A732b5`](https://testnet.arcscan.app/address/0x5Ddf555F6d360203d02Fe1D9be49b13981A732b5) |
-| AgoraFx v2 | `🔨 deploying — adds USDC staking logic` |
+| PredictionMarket v2 | `🔨 deploying — adds USDC staking logic` |
 | USDC | [`0x3600000000000000000000000000000000000000`](https://testnet.arcscan.app/address/0x3600000000000000000000000000000000000000) |
 | EURC | [`0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a`](https://testnet.arcscan.app/address/0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a) |
 
@@ -214,7 +216,7 @@ agorafx/
 ├── frontend/
 │   └── src/
 │       ├── App.jsx        # Main UI
-│       ├── Intelligence.jsx # Market Intelligence tab (v2)
+│       ├── Signals.jsx # Market Intelligence tab (v2)
 │       ├── onchain.js     # ethers.js helpers
 │       └── share.js       # X/Twitter sharing
 └── agorafx.db
@@ -289,12 +291,14 @@ sudo systemctl start agorafx-api  # backend
 | 4 | Circle Agent Wallet — agent economic identity on Arc | ✅ Complete (Lepton) |
 | 5 | x402 nanopayments — agent pays per rate fetch, 90+ payments made | ✅ Complete (Lepton) |
 | 6 | Agent budget system + SHA256 decision log | ✅ Complete (Lepton) |
-| 7 | Market Intelligence tab — RFB 06 creator layer | 🔨 Building (Lepton) |
-| 8 | Agent USDC staking — skin in the game per market | 🔨 Building (Lepton) |
-| 9 | Arc Mainnet + PostgreSQL | ⏳ |
-| 10 | More African pairs (TZS, UGX, MAD) | ⏳ Q3 2026 |
-| 11 | Mobile app | ⏳ Q4 2026 |
-| 12 | Beyond FX — crypto prices, commodities, African stock indices | ⏳ 2027 |
+| 7 | Signals creator layer — RFB 06, analysts earn per article on-chain | ✅ Complete (Lepton) |
+| 8 | New homepage — live stats, how it works, analyst signals teaser | ✅ Complete (Lepton) |
+| 9 | Agent USDC staking — skin in the game per market | 🔨 Building (Lepton) |
+| 10 | Traction push + Lepton submission | 🔨 June 29 deadline |
+| 11 | Arc Mainnet + PostgreSQL | ⏳ Q3 2026 |
+| 12 | More African pairs (TZS, UGX, MAD) | ⏳ Q3 2026 |
+| 13 | Mobile app | ⏳ Q4 2026 |
+| 14 | Beyond FX — crypto prices, commodities, African stock indices | ⏳ 2027 |
 
 ---
 
@@ -303,13 +307,14 @@ sudo systemctl start agorafx-api  # backend
 - 🏆 **Standout Winner** — Agora Agent Hackathon (Canteen × Arc × Circle)
 - 🔨 **Active builder** — Lepton Agents Hackathon (June 15–29, 2026)
 - 📰 Covered by **The Agent Times** — *"architecturally significant for the agent economy"*
-- 📣 Launch post **reposted by @arc official account** — 7.4K impressions, 88 likes, 13 reposts
-- 📊 **3,012 markets** created autonomously, **100% resolution rate**
-- 💰 **$14,970 TVL**, **9,988 total bets**, **119 unique wallets**
-- 🧠 **9,601 autonomous agent decisions** to date
-- ⚡ **90+ live x402 nanopayments** — agent pays for its own data autonomously
-- 💳 **$260 USDC** in Circle Agent Wallet — agent holds and spends its own money
-- 🔗 Every payment verifiable on [Arc Testnet Explorer](https://testnet.arcscan.app)
+- 📣 Launch post **reposted by @arc official account** — 7K impressions, 88 likes
+- 📣 **Mentioned in official @thecanteenapp X post** alongside Lepton builders
+- 📊 **3,076+ markets** autonomously created, **100% resolution rate**
+- 💰 **$16,528 TVL**, **123 unique wallets**
+- 🧠 **9,885+ autonomous agent decisions** to date
+- ⚡ **90+ live x402 nanopayments** — agent pays for its own data, $0.001/signal
+- 📰 **Analyst Signals live** — first article published, 5 paid reads, $0.16 USDC earned by analyst on-chain
+- 🔗 Every payment + payout verifiable on [Arc Testnet Explorer](https://testnet.arcscan.app)
 
 ---
 
