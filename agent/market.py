@@ -1,5 +1,5 @@
 """
-Market — interacts with PredictionMarket.sol on Arc Testnet.
+Market — interacts with PredictionMarket.sol  on Arc Testnet.
 Creates markets, resolves them, and auto-seeds liquidity on both sides.
 """
 import json, logging, time
