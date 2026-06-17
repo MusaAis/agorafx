@@ -5,7 +5,7 @@
 > *"An unverified but architecturally significant hackathon project for the agent economy."*
 > — [The Agent Times](https://theagenttimes.com/articles/builder-ships-agorafx-an-autonomous-agent-for-african-fx-pre-37eca5a1)
 
-> ** v1 Built for** — [Agora Agent Hackathon](https://agora.thecanteenapp.com) by The Canteen × Arc × Circle
+> 🏆 **Standout Winner** — [Agora Agent Hackathon](https://agora.thecanteenapp.com) by The Canteen × Arc × Circle
 > 🔨 **Currently building v2** — [Lepton Agents Hackathon](https://lepton.thecanteenapp.com) by Canteen × Circle × Arc
 
 An autonomous AI agent that monitors real-time African FX rates 24/7, detects momentum using Groq + Llama 3.3, and **automatically creates and resolves on-chain prediction markets** — with no human intervention.
@@ -300,6 +300,7 @@ sudo systemctl start agorafx-api  # backend
 
 ## 📈 Traction
 
+- 🏆 **Standout Winner** — Agora Agent Hackathon (Canteen × Arc × Circle)
 - 🔨 **Active builder** — Lepton Agents Hackathon (June 15–29, 2026)
 - 📰 Covered by **The Agent Times** — *"architecturally significant for the agent economy"*
 - 📣 Launch post **reposted by @arc official account** — 7.4K impressions, 88 likes, 13 reposts
@@ -344,7 +345,7 @@ None of this exists in circlefin/arc-* repos. Full stack open source.
 
 ## 🏆 Built For
 
-- [Agora Agent Hackathon](https://agora.thecanteenapp.com) — The Canteen × Arc × Circle ✅
+- [Agora Agent Hackathon](https://agora.thecanteenapp.com) — The Canteen × Arc × Circle ✅ Standout Winner
 - [Lepton Agents Hackathon](https://lepton.thecanteenapp.com) — Canteen × Circle × Arc 🔨 Active
 
 ---
