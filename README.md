@@ -1,6 +1,6 @@
 # AgoraFX
 
-**African FX Intelligence Marketplace — autonomous AI agent + nanopayments on Arc**
+**The first AI agent that autonomously pays for its own data, stakes on its own markets, and lets African analysts earn per article - on Arc, in USDC**
 
 > *"An unverified but architecturally significant hackathon project for the agent economy."*
 > — [The Agent Times](https://theagenttimes.com/articles/builder-ships-agorafx-an-autonomous-agent-for-african-fx-pre-37eca5a1)
@@ -28,8 +28,8 @@ An autonomous AI agent that monitors real-time African FX rates 24/7, detects mo
 | ⚡ Autonomous x402 Payments | 90+ |
 | 💳 Agent Wallet Balance | $260 USDC |
 | 📰 Analyst Articles Live | 1 |
-| 👁️ Article Reads | 5 |
-| 💸 Total Analyst Earned | $0.16 USDC |
+| 👁️ Article Reads | 7 |
+| 💸 Total Analyst Earned | $0.24 USDC |
 
 → **[Live at agorafx.vercel.app](https://agorafx.vercel.app)**
 
