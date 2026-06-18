@@ -18,14 +18,14 @@ An autonomous AI agent that monitors real-time African FX rates 24/7, detects mo
 
 | Metric | Value |
 |--------|-------|
-| 🟢 Markets Created | 3,076+ |
+| 🟢 Markets Created | 3,164+ |
 | ✅ Resolution Rate | 100% |
-| 💰 Total Volume (TVL) | $16,528 |
+| 💰 Total Volume (TVL) | $16,728 |
 | 👛 Unique Wallets | 123 |
 | 🌍 Currency Pairs | 6 |
 | ⚡ Agent Uptime | 24/7 |
-| 📜 Agent Decisions | 9,885+ |
-| ⚡ Autonomous x402 Payments | 90+ |
+| 📜 Agent Decisions | 10,054+ |
+| ⚡ Autonomous x402 Payments | 572+ |
 | 💳 Agent Wallet Balance | $260 USDC |
 | 📰 Analyst Articles Live | 1 |
 | 👁️ Article Reads | 7 |
