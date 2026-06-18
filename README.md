@@ -76,7 +76,7 @@ AgoraFX is the first micro-payment layer for African FX intelligence — where a
 - Scheduled fallback markets if no momentum detected
 - Groq API key rotation — automatically switches keys on rate limit
 - Monitors 6 African currency pairs simultaneously
-- 11,806+ autonomous decisions made to date
+- 10,344+ autonomous decisions made to date
 
 ### 💳 Circle Agent Wallet (v2 — Lepton)
 - Agent has its own Circle wallet identity on Arc Testnet
@@ -107,7 +107,7 @@ AgoraFX is the first micro-payment layer for African FX intelligence — where a
 - 80% to analyst instantly (raw on-chain ERC-20 transfer), 20% to protocol treasury
 - Server-side wallet-keyed re-read bypass — no re-charge on refresh or device change
 - No subscription needed — pay per piece, earn per piece
-- First live article: *"NGN Parallel Market at ₦1,400"* — 7 paid reads, $0.24 USDC earned
+- First live article: *"NGN Parallel Market at ₦1,400"* — 8 paid reads, $0.32 USDC earned
 
 ### 📡 Rate Accuracy
 - NGN/GHS/KES/ZAR/EGP: queries Flutterwave + ExchangeRate API + freeforex simultaneously
