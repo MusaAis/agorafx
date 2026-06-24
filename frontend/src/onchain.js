@@ -20,10 +20,10 @@ const POSITION_ABI_V1 = [
   "function getMarket(bytes32 marketId) view returns (tuple(bytes32 id, string pair, string question, uint256 threshold, bool isAbove, uint256 expiry, uint256 yesPool, uint256 noPool, uint8 outcome, bool resolved, uint256 createdAt))",
 ];
 
-// V2 getMarket returns 15-field tuple (extra: agentAddress, agentStake, confidence, stakeSettled)
+// V2 getMarket returns 16-field tuple (extra: agentAddress, agentStake, agentCollateral, confidence, stakeSettled)
 const POSITION_ABI_V2 = [
   "function getPosition(bytes32 marketId, address user) view returns (tuple(uint256 yesAmount, uint256 noAmount, bool claimed))",
-  "function getMarket(bytes32 marketId) view returns (tuple(bytes32 id, string pair, string question, uint256 threshold, bool isAbove, uint256 expiry, uint256 yesPool, uint256 noPool, uint8 outcome, bool resolved, uint256 createdAt, address agentAddress, uint256 agentStake, uint256 confidence, bool stakeSettled))",
+  "function getMarket(bytes32 marketId) view returns (tuple(bytes32 id, string pair, string question, uint256 threshold, bool isAbove, uint256 expiry, uint256 yesPool, uint256 noPool, uint8 outcome, bool resolved, uint256 createdAt, address agentAddress, uint256 agentStake, uint256 agentCollateral, uint256 confidence, bool stakeSettled))",
 ];
 
 const USDC_ABI = [
