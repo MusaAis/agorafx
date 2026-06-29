@@ -1,18 +1,33 @@
 """
 Decision Engine — runs every 5 minutes.
 
-v2 changes (post-Lepton judge feedback):
-- LLM decisions now use memory of recent history per pair (own track record)
+v2.1 changes (fixes EURC positional bias bug found June 29):
+- ROOT CAUSE FOUND: previous version showed the LLM all 6 pairs in one prompt
+  and asked it to pick ONE to respond about. The model defaulted to whichever
+  pair appeared first in MONITORED_PAIRS (USDC/EURC) almost every single time
+  due to LLM primacy bias — 720/731 decisions over 5 days were logged against
+  EURC specifically, even when reasoning text said "momentum unclear for all
+  pairs." NGN/GHS/KES/ZAR/EGP were getting essentially zero real evaluation.
+- FIX: the LLM now runs ONCE PER PAIR per cycle, with a focused single-pair
+  prompt. No pair competes with another for "selection." Every pair gets a
+  genuine, independent decision every cycle. Pair order is also shuffled each
+  cycle so even residual model bias can't anchor to list position.
+- This also fixes the fallback gate: _consecutive_llm_holds() was always
+  returning 0 for non-EURC pairs (since they had zero decision rows at all),
+  which silently meant fallback NEVER fired for them either — they were
+  getting no markets from either source. Now every pair accumulates real
+  decision history, so the fallback gate works as originally designed.
+
+v2 changes (post-Lepton judge feedback) — retained:
+- LLM decisions use memory of recent history per pair (own track record)
 - Asymmetric confidence thresholds — raises the bar after recent misses
-- Real abstention — LLM can explicitly HOLD on ambiguous signal, no forced direction
-- Fallback scheduler no longer disguised as an LLM decision:
-  tagged source="fallback" vs source="llm" in the decisions table
-- Fallback only fires after the LLM has held N consecutive cycles for a pair —
-  it is a true last-resort, not a blind alternator racing the LLM
+- Real abstention — LLM can explicitly HOLD on ambiguous signal
+- Fallback tagged source="fallback" vs source="llm" — honest, auditable
+- Fallback only fires after sustained genuine LLM holds on that specific pair
 """
 
 import os
-import json, logging, time
+import json, logging, random
 from datetime import datetime, timezone
 from groq import AsyncGroq
 import itertools
@@ -42,32 +57,31 @@ from .db     import get_recent_rates, insert_decision, get_conn
 
 log = logging.getLogger("decision")
 
-# How many consecutive LLM HOLDs on a pair before the fallback is allowed to fire
 FALLBACK_HOLD_THRESHOLD = 6   # at 5min cycles ≈ 30 min of genuine LLM inaction
 
-# Momentum band considered "ambiguous" — LLM is told explicitly not to force a guess here
 AMBIGUOUS_MOMENTUM_LOW  = 0.10
 AMBIGUOUS_MOMENTUM_HIGH = 0.20
 
+# Single-pair focused prompt — no competition with other pairs for "selection"
 SYSTEM_PROMPT = """You are AgoraFX — an AI agent creating African FX prediction markets on Arc blockchain.
 
-You are shown:
-1. Live rate momentum for each monitored pair
-2. Your own recent decision history for that pair (what you decided, your confidence, and whether each resolved market was correct)
+You are evaluating ONE specific currency pair right now. You are shown:
+1. Live rate momentum for this pair only
+2. Your own recent decision history for this exact pair (what you decided, your confidence, and whether each resolved market was correct)
 
-Use BOTH to decide whether to open a market. This is not a momentum-only check.
+Decide whether to open a market for THIS pair only.
 
 Rules:
 - Only act (create_market) if momentum is clear (>=0.15%) AND your recent track record on this pair does not suggest you should be more cautious.
 - If your last 2 decisions on this pair were WRONG, raise your effective confidence bar — require stronger momentum or explicitly HOLD instead.
 - If momentum is in the ambiguous band (0.10%-0.20%), prefer HOLD unless your recent history on this pair has been accurate — explain this tradeoff in your reasoning.
-- Confidence must reflect genuine certainty given momentum AND track record — not just momentum size. A pair with strong momentum but a recent wrong call should NOT get a high confidence score.
+- Confidence must reflect genuine certainty given momentum AND track record — not just momentum size. Strong momentum with a recent wrong call should NOT get a high confidence score.
 - It is correct and expected to HOLD often. Do not force a directional guess to "have something to report."
 
 Respond ONLY with valid JSON, no markdown:
 
 If opening:
-{"action":"create_market","reasoning":"Short reason referencing both momentum and track record","pair":"USDC/NGN","question":"Will 1 USDC be worth more than ₦1,371 in the next hour?","threshold":1371000000,"is_above":true,"expiry_offset_sec":3600,"confidence":78}
+{"action":"create_market","reasoning":"Short reason referencing both momentum and track record","question":"Will 1 USDC be worth more than ₦1,371 in the next hour?","threshold":1371000000,"is_above":true,"expiry_offset_sec":3600,"confidence":78}
 
 If not:
 {"action":"hold","reasoning":"Short reason — state whether this is a momentum issue, a track-record caution, or both","confidence":15}
@@ -75,13 +89,12 @@ If not:
 threshold = rate × 1000000 as integer.
 
 IMPORTANT question formatting:
-- NGN/GHS/KES/ZAR: round to nearest whole number. Example: ₦1,371 not ₦1371.06316
+- NGN/GHS/KES/ZAR/EGP: round to nearest whole number. Example: ₦1,371 not ₦1371.06316
 - EURC/USDC: round to 4 decimal places. Example: 1.1606 not 1.16061662
 - Always use comma thousands separator for fiat amounts"""
 
 
 def _last_market_direction(pair: str) -> bool | None:
-    """Returns is_above of last created market for a pair, or None if first."""
     conn = get_conn()
     row  = conn.execute(
         "SELECT is_above FROM markets WHERE pair=? ORDER BY id DESC LIMIT 1", (pair,)
@@ -97,11 +110,6 @@ def _calc_momentum(rates: list) -> float:
 
 
 def _consecutive_llm_holds(pair: str) -> int:
-    """
-    How many consecutive cycles has the LLM (source='llm') held on this pair,
-    counting back from the most recent decision of any source.
-    Resets to 0 the moment a create_market or a fallback decision appears.
-    """
     conn = get_conn()
     rows = conn.execute(
         """SELECT action, source FROM decisions
@@ -120,10 +128,6 @@ def _consecutive_llm_holds(pair: str) -> int:
 
 
 def _recent_decision_history(pair: str, n: int = 5) -> list[dict]:
-    """
-    Last N *resolved-aware* decisions for this pair, for the LLM's own memory.
-    Joins against markets table where possible to attach actual outcome.
-    """
     conn = get_conn()
     rows = conn.execute(
         """SELECT d.action, d.confidence, d.is_above, d.reasoning, d.created_at,
@@ -146,43 +150,34 @@ def _format_history_for_prompt(history: list[dict]) -> str:
         outcome = "unresolved"
         if h.get("resolved"):
             outcome = "CORRECT" if h.get("outcome") == h.get("is_above") else "WRONG"
-        lines.append(
-            f"  - {h['action']} conf={h['confidence']} -> {outcome}"
-        )
+        lines.append(f"  - {h['action']} conf={h['confidence']} -> {outcome}")
     return "\n".join(lines)
 
 
-def _build_prompt(all_rates: dict) -> str:
-    """Includes momentum AND per-pair decision memory."""
-    now = datetime.now(timezone.utc).strftime("%H:%M UTC")
-    sections = []
-    for pair, rates in all_rates.items():
-        if not rates: continue
-        m = _calc_momentum(rates)
-        if len(rates) < 2:
-            continue
-        diff   = rates[-1]["rate"] - rates[0]["rate"]
-        trend  = "up" if diff > 0 else "down"
-        latest = rates[-1]["rate"]
-        snaps  = [{"r": round(r["rate"], 6), "t": r["recorded_at"][11:16]} for r in rates[-3:]]
+def _build_single_pair_prompt(pair: str, rates: list, momentum: float) -> str:
+    """Focused prompt for exactly one pair — no other pairs shown, no selection bias possible."""
+    now    = datetime.now(timezone.utc).strftime("%H:%M UTC")
+    diff   = rates[-1]["rate"] - rates[0]["rate"]
+    trend  = "up" if diff > 0 else "down"
+    latest = rates[-1]["rate"]
+    snaps  = [{"r": round(r["rate"], 6), "t": r["recorded_at"][11:16]} for r in rates[-3:]]
 
-        history_str = _format_history_for_prompt(_recent_decision_history(pair, n=3))
-        ambiguous = AMBIGUOUS_MOMENTUM_LOW <= m <= AMBIGUOUS_MOMENTUM_HIGH
+    history_str = _format_history_for_prompt(_recent_decision_history(pair, n=3))
+    ambiguous   = AMBIGUOUS_MOMENTUM_LOW <= momentum <= AMBIGUOUS_MOMENTUM_HIGH
 
-        sections.append(
-            f"{pair} {trend} {m:.3f}%{' [AMBIGUOUS BAND]' if ambiguous else ''} | now={latest} | {snaps}\n"
-            f"  recent history:\n{history_str}"
-        )
-    return f"{now}\n" + "\n".join(sections) + "\nOpen market?"
+    return (
+        f"{now}\n"
+        f"Pair: {pair}\n"
+        f"Momentum: {trend} {momentum:.3f}%{' [AMBIGUOUS BAND]' if ambiguous else ''}\n"
+        f"Latest rate: {latest}\n"
+        f"Recent snapshots: {snaps}\n"
+        f"Recent history on this pair:\n{history_str}\n"
+        f"Open market for {pair}?"
+    )
 
 
 def _insert_decision(pair, action, reasoning, threshold=None, is_above=True,
                       confidence=0, source="llm"):
-    """
-    Insert with confidence AND source ('llm' | 'fallback').
-    source is critical: it's what lets us honestly report which decisions
-    were real model output vs the deterministic scheduler.
-    """
     conn = get_conn()
     try:
         conn.execute(
@@ -192,7 +187,6 @@ def _insert_decision(pair, action, reasoning, threshold=None, is_above=True,
             (pair, action, reasoning, threshold, int(is_above), confidence, source)
         )
     except Exception:
-        # Fallback if source/confidence columns don't exist yet — run the migration below
         conn.execute(
             """INSERT INTO decisions (pair, action, reasoning, threshold, is_above, created_at)
                VALUES (?,?,?,?,?,datetime('now'))""",
@@ -202,7 +196,6 @@ def _insert_decision(pair, action, reasoning, threshold=None, is_above=True,
 
 
 def _clean_question(decision: dict) -> dict:
-    """Round thresholds and clean question text for readability."""
     pair      = decision.get("pair", "")
     threshold = decision.get("threshold", 0)
     is_above  = decision.get("is_above", True)
@@ -222,33 +215,8 @@ def _clean_question(decision: dict) -> dict:
     return decision
 
 
-async def run_decision_cycle() -> dict | None:
-    # ── pay for the signal before deciding ────────────────────────
-    signal_result = await pay_and_fetch()
-    _paid_signal: dict = {}
-    if signal_result["action"] == "PAID" and signal_result.get("data"):
-        _paid_signal = signal_result["data"]
-        log.info(
-            "x402 PAID $%.4f — %s %s conf=%.2f hash=%.12s",
-            signal_result["cost_usdc"],
-            _paid_signal.get("pair", "?"),
-            _paid_signal.get("direction", "?"),
-            _paid_signal.get("confidence", 0.0),
-            signal_result["reasoning_hash"],
-        )
-    else:
-        log.info("x402 %s — proceeding with cached rates", signal_result["action"])
-
-    all_rates = {}
-    any_data  = False
-    for p in MONITORED_PAIRS:
-        rates = get_recent_rates(p["pair"], DECISION_LOOKBACK)
-        all_rates[p["pair"]] = rates
-        if len(rates) >= 3: any_data = True
-
-    if not any_data:
-        log.info("Not enough data yet"); return None
-
+async def _call_groq(prompt: str) -> dict | None:
+    """Single Groq call with key rotation — returns parsed JSON dict or None."""
     keys = _get_groq_keys()
     response = None
     last_err = None
@@ -259,15 +227,15 @@ async def run_decision_cycle() -> dict | None:
                 model="llama-3.3-70b-versatile",
                 messages=[
                     {"role":"system","content":SYSTEM_PROMPT},
-                    {"role":"user",  "content":_build_prompt(all_rates)},
+                    {"role":"user",  "content":prompt},
                 ],
-                max_tokens=220, temperature=0.3,
+                max_tokens=180, temperature=0.3,
             )
-            break  # success
+            break
         except Exception as e:
             last_err = e
             if "rate_limit" in str(e).lower() or "429" in str(e):
-                log.warning(f"Groq key limit hit, rotating to next key")
+                log.warning("Groq key limit hit, rotating to next key")
                 continue
             log.error(f"Groq error: {e}")
             return None
@@ -278,48 +246,85 @@ async def run_decision_cycle() -> dict | None:
     raw = response.choices[0].message.content.strip()
     if "```" in raw:
         for p in raw.split("```"):
-            p=p.strip()
-            if p.startswith("json"): p=p[4:].strip()
-            if p.startswith("{"): raw=p; break
+            p = p.strip()
+            if p.startswith("json"): p = p[4:].strip()
+            if p.startswith("{"): raw = p; break
 
-    try: decision = json.loads(raw)
-    except: log.error("JSON parse failed"); return None
+    try:
+        return json.loads(raw)
+    except Exception:
+        log.error(f"JSON parse failed. Raw: {raw[:200]}")
+        return None
 
-    action     = decision.get("action","hold")
-    reasoning  = decision.get("reasoning","")
-    confidence = min(100, max(0, int(decision.get("confidence",0))))
-    pair_for_log = decision.get("pair","USDC/EURC")
 
-    log.info(f"🤖 LLM [{action}] {pair_for_log} {reasoning} (confidence: {confidence}%)")
+async def run_decision_cycle() -> dict | None:
+    """
+    v3: evaluates EVERY pair independently this cycle, one focused LLM call
+    each, in randomized order. Returns the FIRST create_market decision found
+    (if any); all pairs still get their hold/create decision logged either way.
+    """
+    # ── pay for the signal before deciding ────────────────────────
+    signal_result = await pay_and_fetch()
+    if signal_result["action"] == "PAID" and signal_result.get("data"):
+        d = signal_result["data"]
+        log.info(
+            "x402 PAID $%.4f — %s %s conf=%.2f hash=%.12s",
+            signal_result["cost_usdc"], d.get("pair", "?"), d.get("direction", "?"),
+            d.get("confidence", 0.0), signal_result["reasoning_hash"],
+        )
+    else:
+        log.info("x402 %s — proceeding with cached rates", signal_result["action"])
 
-    # ALL LLM output goes through here, tagged source="llm" — this is the real model signal
-    _insert_decision(
-        pair=pair_for_log, action=action,
-        reasoning=reasoning, threshold=decision.get("threshold"),
-        is_above=decision.get("is_above",True), confidence=confidence,
-        source="llm",
-    )
+    pairs_to_check = MONITORED_PAIRS.copy()
+    random.shuffle(pairs_to_check)  # no positional bias — order changes every cycle
 
-    if action=="create_market":
-        required = ["pair","question","threshold","is_above","expiry_offset_sec"]
-        if all(f in decision for f in required):
-            decision = _clean_question(decision)
-            return decision
-    return None
+    market_to_create = None
+
+    for p in pairs_to_check:
+        pair  = p["pair"]
+        rates = get_recent_rates(pair, DECISION_LOOKBACK)
+
+        if len(rates) < 3:
+            log.info(f"Skipping {pair} — not enough rate data yet ({len(rates)} points)")
+            continue
+
+        momentum = _calc_momentum(rates)
+        prompt   = _build_single_pair_prompt(pair, rates, momentum)
+
+        decision = await _call_groq(prompt)
+        if decision is None:
+            log.warning(f"No usable LLM response for {pair} this cycle")
+            continue
+
+        action     = decision.get("action", "hold")
+        reasoning  = decision.get("reasoning", "")
+        confidence = min(100, max(0, int(decision.get("confidence", 0))))
+
+        log.info(f"🤖 LLM [{action}] {pair} {reasoning} (confidence: {confidence}%)")
+
+        _insert_decision(
+            pair=pair, action=action, reasoning=reasoning,
+            threshold=decision.get("threshold"), is_above=decision.get("is_above", True),
+            confidence=confidence, source="llm",
+        )
+
+        if action == "create_market" and market_to_create is None:
+            required = ["question", "threshold", "is_above", "expiry_offset_sec"]
+            if all(f in decision for f in required):
+                decision["pair"] = pair
+                market_to_create = _clean_question(decision)
+                # Don't break — still evaluate remaining pairs so their
+                # decisions get logged too. Only the first create wins this cycle.
+
+    return market_to_create
 
 
 async def build_scheduled_market() -> dict | None:
     """
     True last-resort fallback — ONLY fires for a pair after the LLM has
     genuinely held FALLBACK_HOLD_THRESHOLD consecutive cycles on it.
-
-    This is the key fix from judge feedback: previously this ran as a blind
-    alternator racing the LLM and inserted fake confidence=50 rows that looked
-    like model output. Now it:
-      1. Checks real consecutive LLM hold count per pair before acting at all
-      2. Tags its own decisions source="fallback" — never disguised as "llm"
-      3. Still alternates direction when it does fire, since that's a
-         reasonable tie-break for a true last-resort, but it's clearly labeled
+    Now functions correctly for ALL pairs since run_decision_cycle() v3
+    logs a real decision row for every pair every cycle.
     """
     conn = get_conn()
     for p in MONITORED_PAIRS:
@@ -329,7 +334,6 @@ async def build_scheduled_market() -> dict | None:
         ).fetchone()[0]
         if active > 0: continue
 
-        # Gate: only allow fallback if the LLM has truly held repeatedly on this pair
         hold_streak = _consecutive_llm_holds(pair)
         if hold_streak < FALLBACK_HOLD_THRESHOLD:
             continue
@@ -360,8 +364,6 @@ async def build_scheduled_market() -> dict | None:
             f"({direction_str}): {question}"
         )
 
-        # Tagged source="fallback" — honest about what made this decision.
-        # confidence intentionally low/neutral (not faked as model certainty).
         _insert_decision(
             pair=pair, action="create_market",
             reasoning=f"Fallback after {hold_streak} consecutive LLM holds — {direction_str}",
