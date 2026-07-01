@@ -14,23 +14,24 @@ An autonomous AI agent that monitors real-time African FX rates 24/7, detects mo
 
 ---
 
-## 📊 Live Stats — Arc Testnet (June 18, 2026)
+## 📊 Live Stats — Arc Testnet (June 30, 2026)
 
 | Metric | Value |
 |--------|-------|
-| 🟢 Markets Created | 3,289+ |
+| 🟢 Markets Created | 3,700+ |
 | ✅ Resolution Rate | 100% |
-| 💰 Total Volume (TVL) | $17,048 |
-| 👛 Unique Wallets | 125 |
+| 💰 Total Volume (TVL) | $17,230+ |
+| 👛 Unique Wallets | 128 |
 | 🌍 Currency Pairs | 6 |
 | ⚡ Agent Uptime | 24/7 |
-| 📜 Agent Decisions | 10,344+ |
-| ⚡ Autonomous x402 Payments | 828+ |
-| 💳 Agent Wallet Balance | $260 USDC |
+| 📜 Agent Decisions | 11,000+ |
+| ⚡ Autonomous x402 Payments | 1,400+ |
+| 💳 Agent Wallet Balance | $280 USDC |
+| 🎯 Agent Staked (V2) | $193+ USDC |
+| 💥 Agent Slashed | $78+ USDC |
+| 🎯 Agent Accuracy | 44.8% |
 | 📰 Analyst Articles Live | 2 |
-| 👁️ Article Reads | 10 |
-| 💸 Total Analyst Earned | $0.36 USDC |
-| 🎯 Agent-Staked Markets (V2) | Live — first market deployed |
+| 💸 Total Analyst Earned | $0.56 USDC |
 
 → **[Live at agorafx.vercel.app](https://agorafx.vercel.app)**
 
@@ -76,7 +77,7 @@ AgoraFX is the first micro-payment layer for African FX intelligence — where a
 - Scheduled fallback markets if no momentum detected
 - Groq API key rotation — automatically switches keys on rate limit
 - Monitors 6 African currency pairs simultaneously
-- 10,344+ autonomous decisions made to date
+- 11,000+ autonomous decisions made to date
 
 ### 💳 Circle Agent Wallet (v2 — Lepton)
 - Agent has its own Circle wallet identity on Arc Testnet
@@ -89,9 +90,9 @@ AgoraFX is the first micro-payment layer for African FX intelligence — where a
 - Budget system: pay for fresh data (confidence ≥ 20%) or use cache
 - Every economic decision logged with SHA256 hash — fully auditable
 - `/rates/signal` exposed as public x402 endpoint — other agents pay to consume
-- 828+ live autonomous payments made and verifiable on-chain
+- 1,400+ live autonomous payments made and verifiable on-chain
 
-### 🎯 Agent Stakes USDC Per Market (v2 — Lepton, NEW)
+### 🎯 Agent Stakes USDC Per Market (v2 — Lepton)
 - Agent stakes real USDC on every market it creates via `PredictionMarketV2`
 - Stake formula: `$0.50 base + (confidence × $0.50)` — higher conviction, higher stake
 - $0.20 of every stake seeds YES/NO pools to prevent VOID markets
@@ -99,7 +100,6 @@ AgoraFX is the first micro-payment layer for African FX intelligence — where a
 - Correct prediction → full collateral returned to agent
 - On-chain agent reputation via `getAgentStats()`: total predictions, accuracy, total staked, total slashed, total returned
 - V1 contract stays live forever — all existing positions remain claimable
-- First V2 market live: [`0x3fa614a...4986f56`](https://testnet.arcscan.app/tx/0x3fa614adc8df239707b6c314a9618944b1d273bfec563152ab938309e4986f56)
 
 ### 📰 Signals — Creator Layer (v2 — RFB 06, Lepton)
 - African analysts publish FX commentary on-platform
@@ -107,12 +107,18 @@ AgoraFX is the first micro-payment layer for African FX intelligence — where a
 - 80% to analyst instantly (raw on-chain ERC-20 transfer), 20% to protocol treasury
 - Server-side wallet-keyed re-read bypass — no re-charge on refresh or device change
 - No subscription needed — pay per piece, earn per piece
-- First live article: *"NGN Parallel Market at ₦1,400"* — 8 paid reads, $0.32 USDC earned
+
+### 🧠 Decision Engine v3 (June 30, 2026)
+- **Root cause fixed:** previous version passed all 6 pairs to one LLM call and asked it to pick one — LLM primacy bias caused EURC (first in list) to be selected 720/731 times over 5 days, leaving GHS/KES/ZAR/NGN with near-zero real evaluation
+- **Fix:** one focused LLM call per pair per cycle, pair order randomized each cycle — no positional bias possible
+- Every pair now generates independent, genuine hold/create decisions with pair-specific reasoning and confidence
+- Fallback gate now works correctly for all pairs (was silently broken for non-EURC pairs that had zero decision history)
+- All decisions tagged `source="llm"` vs `source="fallback"` — fully auditable ratio
 
 ### 📡 Rate Accuracy
 - NGN/GHS/KES/ZAR/EGP: queries Flutterwave + ExchangeRate API + freeforex simultaneously
 - NGN: picks highest rate (closest to real Nigerian parallel market rate)
-- EURC/USDC: queries 4 sources simultaneously, uses median to filter outliers
+- EURC/USDC: prioritizes Coinbase (live tick) — fixed June 24 after discovering 3 of 4 sources were daily-refresh APIs, causing 0.000% momentum every cycle
 - Stale rates automatically overridden by fresher sources
 
 ### 🖥️ Frontend
@@ -159,27 +165,26 @@ AgoraFX is the first micro-payment layer for African FX intelligence — where a
 - Market creation / x402 receiver: `0xca3B6Cc345e82F063EF61d534cAaA36c20c2b061`
 - Circle Agent Wallet: `0xf06774e07888620f2edf0565d1ae24e58778fe19`
 
-**First V2 staked market:** [`0x3fa614adc8df239707b6c314a9618944b1d273bfec563152ab938309e4986f56`](https://testnet.arcscan.app/tx/0x3fa614adc8df239707b6c314a9618944b1d273bfec563152ab938309e4986f56)
-
 ---
 
-## 🤖 Agent Architecture (v2)
+## 🤖 Agent Architecture (v3)
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                       AgoraFX Agent v2                          │
+│                     AgoraFX Agent v3                            │
 ├──────────────────┬─────────────────────┬────────────────────────┤
 │  Rate Monitor    │   Decision Engine   │   Market Resolver      │
 │  every 30s       │   every 5min        │   every 60s            │
 ├──────────────────┼─────────────────────┼────────────────────────┤
-│ x402 pay $0.001  │ Budget: pay vs cache│ Resolves on correct    │
-│ per rate fetch   │ Confidence ≥ 20%    │ contract (V1 or V2)    │
-│ from agent wallet│ → pay for fresh     │                        │
-│                  │ < 20% → use cache   │ Stake returned (right) │
-│ Logs: PAID /     │                     │ or slashed (wrong) on  │
-│ CACHED / HOLD    │ Stakes $0.50–$1.00  │ V2 markets             │
-│ with SHA256 hash │ USDC per market     │                        │
-│                  │ created on V2       │                        │
+│ x402 pay $0.001  │ 1 LLM call PER PAIR │ Resolves on correct    │
+│ per rate fetch   │ per cycle (6 calls) │ contract (V1 or V2)    │
+│ from agent wallet│ Randomized order    │                        │
+│                  │ each cycle —        │ Stake returned (right) │
+│ Logs: PAID /     │ no positional bias  │ or slashed (wrong) on  │
+│ CACHED / HOLD    │                     │ V2 markets             │
+│ with SHA256 hash │ Stakes $0.50–$1.00  │                        │
+│                  │ USDC per market     │ ABI fixed: 16-field    │
+│                  │ created on V2       │ struct, not 15         │
 └──────────────────┴─────────────────────┴────────────────────────┘
                             │
                 ┌───────────▼──────────┐
@@ -206,9 +211,6 @@ AgoraFX is the first micro-payment layer for African FX intelligence — where a
 | Correct prediction | Full collateral returned to agent |
 | Min user bet | $0.10 USDC (lowered from $1.00) |
 
-**Example at confidence = 0.73:**
-Agent pulls $0.865 USDC total → $0.20 seeds both pools → $0.665 at risk. Wrong: $0.332 to bettors + $0.332 to treasury. Right: full $0.665 returned.
-
 Every agent's track record is queryable on-chain via `getAgentStats(address)` — total predictions, accuracy, total staked, total slashed, total returned. Full transparency, no trust required.
 
 ---
@@ -221,7 +223,7 @@ Every agent's track record is queryable on-chain via `getAgentStats(address)` �
 | Circle EURC | ✅ FX pair | ✅ unchanged |
 | Arc Contracts | ✅ PredictionMarket v1 | ✅ + PredictionMarketV2 with staking |
 | Circle Agent Wallet | ❌ | ✅ `0xf067...fe19` — agent economic identity |
-| x402 Protocol | ❌ | ✅ Signal endpoint + article paywall, 828+ live payments |
+| x402 Protocol | ❌ | ✅ Signal endpoint + article paywall, 1,400+ live payments |
 | Gateway Nanopayments | ❌ | ✅ Sub-cent settlement for signals + articles |
 
 ---
@@ -233,15 +235,15 @@ agorafx/
 ├── agent/
 │   ├── main.py           # Orchestrator — 3 async loops
 │   ├── monitor.py        # Rate polling (4 sources, 6 pairs)
-│   ├── decision.py       # Groq/Llama market creation + budget logic
-│   ├── market.py         # On-chain contract interaction + V1/V2 staking routing
+│   ├── decision.py       # Decision engine v3 — per-pair LLM evaluation
+│   ├── market.py         # On-chain contract interaction + V1/V2 routing
 │   ├── wallet.py         # Circle Agent Wallet wrapper
 │   ├── x402_client.py    # x402 outbound payment client
 │   ├── decision_log.py   # SHA256 decision audit log
-│   ├── db.py             # SQLite layer + contract_version column
+│   ├── db.py             # SQLite layer
 │   └── config.py         # Environment + monitored pairs + dual contract addresses
 ├── backend/
-│   ├── main.py           # FastAPI — markets, rates, stats, agent (dual contract aware)
+│   ├── main.py           # FastAPI — markets, rates, stats, agent
 │   ├── x402_middleware.py # x402 payment middleware — make_x402_guard() factory
 │   └── intelligence.py   # Signals / creator layer router
 ├── contracts/
@@ -252,7 +254,7 @@ agorafx/
 │       ├── App.jsx         # Main dApp shell
 │       ├── Home.jsx        # Landing page
 │       ├── Signals.jsx     # Signals / creator tab
-│       ├── onchain.js      # ethers.js — dual contract ABI + routing
+│       ├── onchain.js      # ethers.js — dual contract ABI (16-field V2 fixed)
 │       └── share.js        # X/Twitter sharing
 └── agorafx.db
 ```
@@ -319,16 +321,6 @@ uvicorn backend.main:app --host 0.0.0.0 --port 8001
 cd frontend && npm install && npm run dev
 ```
 
-### Deploy V2 contract
-```bash
-forge clean && forge build
-forge script scripts/deploy_v2.sol:DeployV2 \
-  --rpc-url "$ARC_TESTNET_RPC_URL" \
-  --private-key "$PKEY" \
-  --via-ir \
-  --broadcast
-```
-
 ### Production (systemd)
 ```bash
 sudo systemctl start agorafx      # agent
@@ -345,16 +337,19 @@ sudo systemctl start agorafx-api  # backend
 | 2 | On-chain prediction markets — USDC settlement, auto-resolution | ✅ Complete |
 | 3 | React frontend — ticker, markets, positions, agent feed | ✅ Complete |
 | 4 | Circle Agent Wallet — agent economic identity on Arc | ✅ Complete (Lepton) |
-| 5 | x402 nanopayments — agent pays per rate fetch, 828+ payments made | ✅ Complete (Lepton) |
+| 5 | x402 nanopayments — agent pays per rate fetch, 1,400+ payments | ✅ Complete (Lepton) |
 | 6 | Agent budget system + SHA256 decision log | ✅ Complete (Lepton) |
 | 7 | Signals creator layer — RFB 06, analysts earn per article on-chain | ✅ Complete (Lepton) |
 | 8 | New homepage — live stats, how it works, analyst signals teaser | ✅ Complete (Lepton) |
-| 9 | **PredictionMarketV2 — agent stakes USDC per market, slashing + reputation** | ✅ Complete (Lepton) |
-| 10 | Traction push + Lepton submission | 🔨 June 29 deadline |
-| 11 | Arc Mainnet + PostgreSQL | ⏳ 2026 |
-| 12 | More African pairs (TZS, UGX, MAD) | ⏳ Q3 2026 |
-| 13 | Mobile app | ⏳ Q4 2026 |
-| 14 | Beyond FX — crypto prices, commodities, African stock indices | ⏳ 2027 |
+| 9 | PredictionMarketV2 — agent stakes USDC per market, slashing + reputation | ✅ Complete (Lepton) |
+| 10 | EURC rate fix — prioritize live Coinbase feed over daily-refresh sources | ✅ Complete (Lepton) |
+| 11 | V2 ABI fix — 16-field struct, resolver sync working correctly | ✅ Complete (Lepton) |
+| 12 | Decision engine v3 — per-pair LLM evaluation, eliminates positional bias | ✅ Complete (Lepton) |
+| 13 | Traction push + final Lepton submission | 🔨 July 6 deadline |
+| 14 | Arc Mainnet + PostgreSQL | ⏳ Q3 2026 |
+| 15 | More African pairs (TZS, UGX, MAD) | ⏳ Q3 2026 |
+| 16 | Mobile app | ⏳ Q4 2026 |
+| 17 | Beyond FX — crypto prices, commodities, African stock indices | ⏳ 2027 |
 
 ---
 
@@ -363,25 +358,25 @@ sudo systemctl start agorafx-api  # backend
 **Before Lepton — Agora baseline:**
 - 119 unique wallets · 2,483 markets · $14,970 TVL · 9,683 bets · 8,032 agent decisions
 
-**During Lepton (June 15–18):**
-- 📊 **3,289+ markets** total, **100% resolution rate**, **$17,048 TVL**, **125 wallets**
-- 🧠 **10,344+ autonomous agent decisions** to date
-- ⚡ **828+ live x402 nanopayments** — agent pays for its own data, $0.001/signal
-- 📰 **Signals live** — 2 analyst article, 7 paid reads, $0.36 USDC earned on-chain
-- 🎯 **PredictionMarketV2 deployed** — first agent-staked market live on-chain
+**During Lepton (June 15 – July 6):**
+- 📊 **3,700+ markets** total, **100% resolution rate**, **$17,230+ TVL**, **128 wallets**
+- 🧠 **11,000+ autonomous agent decisions** to date
+- ⚡ **1,400+ live x402 nanopayments** — agent pays for its own data, $0.001/signal
+- 🎯 **$193+ USDC staked** by agent on V2 markets, **$78+ slashed** on wrong predictions
+- 📰 **Signals live** — 2 analyst articles, $0.56 USDC earned on-chain by African analysts
+- 🔍 **Decision engine v3** — all 6 pairs independently evaluated, bias eliminated
 
 **Recognition:**
 - 🏆 **Standout Winner** — Agora Agent Hackathon (Canteen × Arc × Circle)
 - 📰 Covered by **The Agent Times** — *"architecturally significant for the agent economy"*
 - 📣 Launch post **reposted by @arc official account** — 7.4K impressions, 88 likes
-- 🤝 **Appointed Lepton Peer Mentor** by Canteen — announced in #announcements
 - 🔗 Every payment + payout + stake verifiable on [Arc Testnet Explorer](https://testnet.arcscan.app)
 
 ---
 
 ## 🐛 Bugs Documented (All Phases)
 
-Every bug we hit building on Arc + Circle is documented so future builders skip them:
+Every bug we hit is documented so future builders skip them:
 
 | Phase | # | Bug | Fix |
 |-------|---|-----|-----|
@@ -399,17 +394,21 @@ Every bug we hit building on Arc + Circle is documented so future builders skip 
 | V2 deploy | 4 | `forge verify-contract` can't resolve file path | Set `src = "Contracts"` in `foundry.toml` |
 | V2 deploy | 5 | `foundry.toml` duplicate keys from repeated appends | Rewrite file cleanly |
 | V2 deploy | 6 | Stack too deep on `Market` struct | Set `via_ir = true` in `foundry.toml` |
-| V2 deploy | 7 | V2 `getMarket` ABI (15 fields) vs V1 (11 fields) — decode mismatch | Separate `POSITION_ABI_V1` / `POSITION_ABI_V2` |
+| V2 contract | 1 | V2 `getMarket` ABI had 15 fields — struct has 16 (`agentCollateral` missing) | Add `agentCollateral uint256` between `agentStake` and `confidence` in both Python + JS ABI |
+| V2 contract | 2 | Missing ABI field caused `getMarket` decode to fail silently — resolver retried already-resolved markets indefinitely | Fix ABI + manually sync stuck DB rows |
+| Rate monitor | 1 | EURC sources 3/4 were daily-refresh APIs — Coinbase live tick outvoted by stale median | Prioritize Coinbase when available, daily sources as fallback only |
+| Decision engine | 1 | All 6 pairs passed to one LLM call — primacy bias caused EURC to be selected 720/731 times | One focused LLM call per pair per cycle, randomized order |
+| Decision engine | 2 | `_consecutive_llm_holds()` returned 0 for pairs with no decision history — fallback gate silently broken | Fixed by v3: all pairs now generate decision rows every cycle |
 
 ---
 
 ## 🏛️ Arc OSS — Primitives Other Builders Can Fork
 
-1. **Multi-source African FX rate aggregator** — polls 4+ live sources with median/max outlier filtering.
-2. **Autonomous AI decision engine** — Groq/Llama converts price signals into on-chain actions with no human in the loop.
+1. **Multi-source African FX rate aggregator** — polls 4+ live sources with median/max outlier filtering, live-source prioritization.
+2. **Autonomous AI decision engine v3** — per-pair focused LLM evaluation with randomized order, memory, asymmetric thresholds, source-tagged audit trail.
 3. **x402 V1 middleware factory** — `make_x402_guard()` FastAPI `Depends()` pattern with per-endpoint price + resource config.
 4. **x402 V1 async payment client** — `pay_and_fetch()` using `EthAccountSigner` + Oracle Cloud DNS fix.
-5. **Agent staking + slashing contract** — `PredictionMarketV2` with on-chain agent reputation (`getAgentStats()`), confidence-weighted stakes, dual-contract migration pattern.
+5. **Agent staking + slashing contract** — `PredictionMarketV2` with on-chain agent reputation, confidence-weighted stakes, dual-contract migration pattern.
 6. **On-chain creator payout pattern** — `BackgroundTasks` ERC-20 transfer after x402 gate, 80/20 split, wallet-keyed re-read bypass.
 
 None of this exists in circlefin/arc-* repos. Full stack open source.
@@ -419,7 +418,7 @@ None of this exists in circlefin/arc-* repos. Full stack open source.
 ## 🏆 Built For
 
 - [Agora Agent Hackathon](https://agora.thecanteenapp.com) — The Canteen × Arc × Circle ✅ Standout Winner
-- [Lepton Agents Hackathon](https://lepton.thecanteenapp.com) — Canteen × Circle × Arc 🔨 Active
+- [Lepton Agents Hackathon](https://lepton.thecanteenapp.com) — Canteen × Circle × Arc 🔨 Active (deadline July 6)
 
 ---
 
