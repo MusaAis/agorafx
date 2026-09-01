@@ -6,7 +6,7 @@
 > — [The Agent Times](https://theagenttimes.com/articles/builder-ships-agorafx-an-autonomous-agent-for-african-fx-pre-37eca5a1)
 
 > 🏆 **Standout Winner** — [Agora Agent Hackathon](https://agora.thecanteenapp.com) by The Canteen × Arc × Circle
-> 🔨 **Currently building** — [Lepton Agents Hackathon](https://lepton.thecanteenapp.com) by Canteen × Circle × Arc
+> 🥉 **3rd Place winner** — [Lepton Agents Hackathon](https://lepton.thecanteenapp.com) by Canteen × Circle × Arc
 
 An autonomous AI agent that monitors real-time African FX rates 24/7, detects momentum using Groq + Llama 3.3, and **automatically creates and resolves on-chain prediction markets** — with no human intervention.
 
@@ -14,24 +14,24 @@ An autonomous AI agent that monitors real-time African FX rates 24/7, detects mo
 
 ---
 
-## 📊 Live Stats — Arc Testnet (June 30, 2026)
+## 📊 Live Stats — Arc Testnet (September 1st, 2026)
 
 | Metric | Value |
 |--------|-------|
-| 🟢 Markets Created | 3,700+ |
+| 🟢 Markets Created | 6,019+ |
 | ✅ Resolution Rate | 100% |
-| 💰 Total Volume (TVL) | $17,230+ |
-| 👛 Unique Wallets | 128 |
+| 💰 Total Volume (TVL) | $17,841+ |
+| 👛 Unique Wallets | 160 |
 | 🌍 Currency Pairs | 6 |
 | ⚡ Agent Uptime | 24/7 |
-| 📜 Agent Decisions | 11,000+ |
-| ⚡ Autonomous x402 Payments | 1,400+ |
-| 💳 Agent Wallet Balance | $280 USDC |
-| 🎯 Agent Staked (V2) | $193+ USDC |
-| 💥 Agent Slashed | $78+ USDC |
-| 🎯 Agent Accuracy | 44.8% |
-| 📰 Analyst Articles Live | 2 |
-| 💸 Total Analyst Earned | $0.56 USDC |
+| 📜 Agent Decisions | 27,780+ |
+| ⚡ Autonomous x402 Payments | 20,690+ |
+| 💳 Agent Wallet Balance | $380 USDC |
+| 🎯 Agent Staked (V2) | $2,098+ USDC |
+| 💥 Agent Slashed | $796+ USDC |
+| 🎯 Agent Accuracy | 48.8% |
+| 📰 Analyst Articles Live | 3 |
+| 💸 Total Analyst Earned | $1.20 USDC |
 
 → **[Live at agorafx.vercel.app](https://agorafx.vercel.app)**
 
@@ -367,7 +367,9 @@ sudo systemctl start agorafx-api  # backend
 - 🔍 **Decision engine v3** — all 6 pairs independently evaluated, bias eliminated
 
 **Recognition:**
+
 - 🏆 **Standout Winner** — Agora Agent Hackathon (Canteen × Arc × Circle)
+- 🥉 **3rd Place Winner** — Lepton Agent Hackathon (Canteen × Arc × Circle)
 - 📰 Covered by **The Agent Times** — *"architecturally significant for the agent economy"*
 - 📣 Launch post **reposted by @arc official account** — 7.4K impressions, 88 likes
 - 🔗 Every payment + payout + stake verifiable on [Arc Testnet Explorer](https://testnet.arcscan.app)
@@ -418,7 +420,7 @@ None of this exists in circlefin/arc-* repos. Full stack open source.
 ## 🏆 Built For
 
 - [Agora Agent Hackathon](https://agora.thecanteenapp.com) — The Canteen × Arc × Circle ✅ Standout Winner
-- [Lepton Agents Hackathon](https://lepton.thecanteenapp.com) — Canteen × Circle × Arc 🔨 Active (deadline July 6)
+- [Lepton Agents Hackathon](https://lepton.thecanteenapp.com) — Canteen × Circle × Arc ✅️ 3rd Place Winner 
 
 ---
 
