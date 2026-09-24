@@ -1,0 +1,12 @@
+{
+  "name": "agorafx-scripts",
+  "version": "2.0.0",
+  "type": "module",
+  "scripts": {
+    "setup-wallet": "node scripts/setup_wallet.js"
+  },
+  "dependencies": {
+    "@circle-fin/developer-controlled-wallets": "^10.6.0",
+    "dotenv": "^16.0.0"
+  }
+}

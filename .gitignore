@@ -15,3 +15,4 @@ recovery/
 *.pem
 register_entity_secret.*
 __pycache__/
+lib/forge-std/
