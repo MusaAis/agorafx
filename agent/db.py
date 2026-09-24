@@ -9,6 +9,7 @@ DB_PATH = "agorafx.db"
 _local  = threading.local()
 
 
+
 def get_conn() -> sqlite3.Connection:
     if not hasattr(_local, "conn"):
         _local.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -21,9 +22,9 @@ def init_db():
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS rates (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            pair        TEXT    NOT NULL,        -- e.g. 'USDC/EURC'
-            rate        REAL    NOT NULL,         -- human-readable float
-            rate_scaled INTEGER NOT NULL,         -- rate × 1e6 for contract
+            pair        TEXT    NOT NULL,
+            rate        REAL    NOT NULL,
+            rate_scaled INTEGER NOT NULL,
             source      TEXT    NOT NULL,
             recorded_at TEXT    NOT NULL
         );
@@ -31,28 +32,29 @@ def init_db():
         CREATE TABLE IF NOT EXISTS decisions (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
             pair          TEXT    NOT NULL,
-            action        TEXT    NOT NULL,       -- 'create_market' | 'hold'
+            action        TEXT    NOT NULL,
             reasoning     TEXT,
-            threshold     INTEGER,                -- scaled × 1e6
-            is_above      INTEGER,                -- 1 = YES wins if rate >= threshold
-            market_id_hex TEXT,                   -- onchain bytes32 after creation
+            threshold     INTEGER,
+            is_above      INTEGER,
+            market_id_hex TEXT,
             created_at    TEXT    NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS markets (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            market_id_hex TEXT    UNIQUE NOT NULL,
-            pair          TEXT    NOT NULL,
-            question      TEXT    NOT NULL,
-            threshold     INTEGER NOT NULL,
-            is_above      INTEGER NOT NULL,
-            expiry_ts     INTEGER NOT NULL,
-            tx_hash       TEXT,
-            resolved      INTEGER DEFAULT 0,
-            outcome       TEXT,
-            created_at    TEXT    NOT NULL
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            market_id_hex    TEXT    UNIQUE NOT NULL,
+            pair             TEXT    NOT NULL,
+            question         TEXT    NOT NULL,
+            threshold        INTEGER NOT NULL,
+            is_above         INTEGER NOT NULL,
+            expiry_ts        INTEGER NOT NULL,
+            tx_hash          TEXT,
+            resolved         INTEGER DEFAULT 0,
+            outcome          TEXT,
+            contract_version TEXT    DEFAULT 'v1',
+            created_at       TEXT    NOT NULL
         );
-        
+
         CREATE TABLE IF NOT EXISTS x402_spend (
             reasoning_hash  TEXT PRIMARY KEY,
             action          TEXT NOT NULL,
@@ -68,6 +70,24 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_x402_date   ON x402_spend (spend_date);
         CREATE INDEX IF NOT EXISTS idx_x402_action ON x402_spend (action);
     """)
+    conn.commit()
+
+
+def insert_market(
+    market_id_hex, pair, question, threshold,
+    is_above, expiry_ts, tx_hash,
+    contract_version="v1",
+):
+    conn = get_conn()
+    conn.execute(
+        """INSERT OR IGNORE INTO markets
+           (market_id_hex, pair, question, threshold, is_above,
+            expiry_ts, tx_hash, contract_version, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (market_id_hex, pair, question, threshold, is_above,
+         expiry_ts, tx_hash, contract_version,
+         datetime.utcnow().isoformat())
+    )
     conn.commit()
 
 
@@ -106,18 +126,6 @@ def insert_decision(pair, action, reasoning, threshold=None, is_above=None, mark
 
 
 # ── Markets ───────────────────────────────────────────────────────
-
-def insert_market(market_id_hex, pair, question, threshold, is_above, expiry_ts, tx_hash):
-    conn = get_conn()
-    conn.execute(
-        """INSERT OR IGNORE INTO markets
-           (market_id_hex, pair, question, threshold, is_above, expiry_ts, tx_hash, created_at)
-           VALUES (?,?,?,?,?,?,?,?)""",
-        (market_id_hex, pair, question, threshold, is_above, expiry_ts, tx_hash,
-         datetime.utcnow().isoformat())
-    )
-    conn.commit()
-
 
 def get_unresolved_markets() -> list:
     conn = get_conn()

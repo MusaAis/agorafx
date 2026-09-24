@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 from .x402_middleware import build_x402_middleware
 from .x402_middleware import require_x402
+from .intelligence import router as intelligence_router, init_intelligence_tables
 from fastapi import Depends
 from fastapi.responses import JSONResponse
 
@@ -24,11 +25,64 @@ log = logging.getLogger("backend")
 
 app = FastAPI(title="AgoraFX API", version="2.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.include_router(intelligence_router)
+
+# Both contract addresses — V1 stays live for existing positions
+from agent.market import get_agent_reputation
+from agent.config import (
+    RPC_URL,
+    CONTRACT_ADDRESS_V1,
+    CONTRACT_ADDRESS_V2,
+    USDC_ADDRESS,
+    CIRCLE_AGENT_WALLET_ADDRESS,
+)
+
+BET_PLACED_ABI = [{"type":"event","name":"BetPlaced","inputs":[
+    {"name":"marketId","type":"bytes32","indexed":True},
+    {"name":"user",   "type":"address","indexed":True},
+    {"name":"isYes",  "type":"bool",   "indexed":False},
+    {"name":"amount", "type":"uint256","indexed":False}
+],"anonymous":False}]
+
+GETMARKET_ABI_V1 = [{"type":"function","name":"getMarket",
+    "inputs":[{"name":"marketId","type":"bytes32"}],
+    "outputs":[{"name":"","type":"tuple","components":[
+        {"name":"id","type":"bytes32"},{"name":"pair","type":"string"},
+        {"name":"question","type":"string"},{"name":"threshold","type":"uint256"},
+        {"name":"isAbove","type":"bool"},{"name":"expiry","type":"uint256"},
+        {"name":"yesPool","type":"uint256"},{"name":"noPool","type":"uint256"},
+        {"name":"outcome","type":"uint8"},{"name":"resolved","type":"bool"},
+        {"name":"createdAt","type":"uint256"}]}],"stateMutability":"view"}]
+
+GETMARKET_ABI_V2 = [{"type":"function","name":"getMarket",
+    "inputs":[{"name":"marketId","type":"bytes32"}],
+    "outputs":[{"name":"","type":"tuple","components":[
+        {"name":"id","type":"bytes32"},{"name":"pair","type":"string"},
+        {"name":"question","type":"string"},{"name":"threshold","type":"uint256"},
+        {"name":"isAbove","type":"bool"},{"name":"expiry","type":"uint256"},
+        {"name":"yesPool","type":"uint256"},{"name":"noPool","type":"uint256"},
+        {"name":"outcome","type":"uint8"},{"name":"resolved","type":"bool"},
+        {"name":"createdAt","type":"uint256"},{"name":"agentAddress","type":"address"},
+        {"name":"agentStake","type":"uint256"},{"name":"confidence","type":"uint256"},
+        {"name":"stakeSettled","type":"bool"}]}],"stateMutability":"view"},
+    {"type":"function","name":"resolveMarket",
+     "inputs":[{"name":"marketId","type":"bytes32"},{"name":"finalRate","type":"uint256"}],
+     "outputs":[],"stateMutability":"nonpayable"}]
+
+
+def _market_contract_version(market_id_hex: str) -> str:
+    """Look up which contract version a market belongs to."""
+    row = get_conn().execute(
+        "SELECT contract_version FROM markets WHERE market_id_hex=?",
+        (market_id_hex,)
+    ).fetchone()
+    return (row[0] or "v1") if row else "v1"
 
 # ─v2─ x402 middleware ───────────────────────────────────────────────────────
 @app.on_event("startup")
 def startup():
     init_db()
+    init_intelligence_tables()
 
 @app.get("/health")
 def health():
@@ -228,9 +282,13 @@ def get_stats():
     for pair in pairs:
         row = conn.execute("SELECT rate FROM rates WHERE pair=? ORDER BY id DESC LIMIT 1",(pair,)).fetchone()
         rates[pair] = row[0] if row else None
+    try:
+        x402_count = conn.execute("SELECT COUNT(*) FROM x402_spend").fetchone()[0]
+    except Exception:
+        x402_count = 0
     return {
         "markets":{"total":total,"active":active,"resolved":total-active,"yes_wins":yes_wins,"no_wins":no_wins},
-        "agent":{"total_decisions":total_d,"markets_created":create_d,"hold_decisions":total_d-create_d},
+        "agent":{"total_decisions":total_d,"markets_created":create_d,"hold_decisions":total_d-create_d,"x402_payments":x402_count},
         "rates": rates,
     }
 
@@ -264,6 +322,45 @@ def get_performance():
         "decisions_today": decisions_today,
         "markets_today":   markets_today,
         "pair_stats": [dict(r) for r in pair_stats],
+    }
+
+@app.get("/agent/reputation")
+async def agent_reputation():
+    """V2 on-chain agent staking reputation — total staked/slashed/returned, accuracy."""
+    try:
+        return await get_agent_reputation()
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/agent/wallet")
+def agent_wallet():
+    """Agent's Circle wallet USDC balance + lifetime x402 spend."""
+    from web3 import Web3
+    try:
+        w3   = Web3(Web3.HTTPProvider(RPC_URL))
+        usdc = w3.eth.contract(
+            address=Web3.to_checksum_address(USDC_ADDRESS),
+            abi=[{"constant":True,"inputs":[{"name":"account","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"}]
+        )
+        balance = usdc.functions.balanceOf(
+            Web3.to_checksum_address(CIRCLE_AGENT_WALLET_ADDRESS)
+        ).call()
+    except Exception as e:
+        balance = None
+
+    conn = get_conn()
+    total_spent = conn.execute(
+        "SELECT COALESCE(SUM(cost_usdc), 0) FROM x402_spend WHERE action='PAID'"
+    ).fetchone()[0]
+    paid_count = conn.execute(
+        "SELECT COUNT(*) FROM x402_spend WHERE action='PAID'"
+    ).fetchone()[0]
+
+    return {
+        "address":          CIRCLE_AGENT_WALLET_ADDRESS,
+        "balance_usdc":     round(balance / 1e6, 4) if balance is not None else None,
+        "total_spent_usdc": round(float(total_spent), 6),
+        "paid_signal_count": paid_count,
     }
 
 def _human_message(item: dict) -> dict:
@@ -372,6 +469,7 @@ def get_agent_logs():
 # ── Chain Stats ───────────────────────────────────────────────────
 
 DEPLOY_BLOCK = 42065487
+DEPLOY_BLOCK_V2 = 47565751
 _v4_cache = {"data": None, "last_block": DEPLOY_BLOCK, "all_wallets": set(), "all_txns": set()}
 
 @app.get("/stats/chain/v4")
@@ -409,57 +507,256 @@ def get_chain_stats_v4():
         if _v4_cache["data"]: return _v4_cache["data"]
         return {"error":str(e),"tvl_usdc":0,"unique_wallets":0,"total_bets":0}
 
+@app.get("/positions/{address}")
+def get_user_positions(address: str):
+    from web3 import Web3
+    from web3.middleware import ExtraDataToPOAMiddleware
+    import sqlite3 as _sqlite3
+
+    db = _sqlite3.connect(DB_PATH)
+    db.row_factory = _sqlite3.Row
+    _ensure_user_bets_table(db)
+
+    try:
+        w3 = Web3(Web3.HTTPProvider(RPC_URL))
+        w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+        latest = w3.eth.block_number
+
+        # Scan both contracts, each with its own last_block cursor
+        for ca, cache_key, deploy_block in [
+            (CONTRACT_ADDRESS_V1, "bets_last_block_v1", DEPLOY_BLOCK),
+            (CONTRACT_ADDRESS_V2, "bets_last_block_v2", DEPLOY_BLOCK_V2),
+        ]:
+            row = db.execute(
+                "SELECT value FROM chain_cache WHERE key=?", (cache_key,)
+            ).fetchone()
+            scan_from = int(row[0]) if row else DEPLOY_BLOCK
+            try:
+                contract = w3.eth.contract(
+                    address=Web3.to_checksum_address(ca), abi=BET_PLACED_ABI
+                )
+                if scan_from <= latest:
+                    _sync_user_bets(db, w3, contract, scan_from, latest)
+                    db.execute(
+                        "INSERT OR REPLACE INTO chain_cache (key, value) VALUES (?,?)",
+                        (cache_key, str(latest + 1))
+                    )
+                    db.commit()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    wallet = address.lower()
+    rows = db.execute(
+        """SELECT market_id,
+                  SUM(CASE WHEN is_yes=1 THEN amount ELSE 0 END) as yes_amt,
+                  SUM(CASE WHEN is_yes=0 THEN amount ELSE 0 END) as no_amt
+           FROM user_bets WHERE wallet=?
+           GROUP BY market_id""",
+        (wallet,)
+    ).fetchall()
+
+    if not rows:
+        db.close()
+        return []
+
+    market_ids   = [r[0] for r in rows]
+    placeholders = ",".join("?" * len(market_ids))
+    markets_rows = db.execute(
+        f"SELECT * FROM markets WHERE market_id_hex IN ({placeholders})", market_ids
+    ).fetchall()
+    markets_map = {m["market_id_hex"]: dict(m) for m in markets_rows}
+
+    result = []
+    for r in rows:
+        mid     = r[0]
+        yes_amt = r[1] or 0
+        no_amt  = r[2] or 0
+        m       = markets_map.get(mid)
+        if not m:
+            continue
+        result.append({"market_id": mid, "market": m, "yes_amt": yes_amt, "no_amt": no_amt})
+
+    db.close()
+    return result
+
+
 @app.get("/stats/chain/v5")
 def get_chain_stats_v5():
     from web3 import Web3
     from web3.middleware import ExtraDataToPOAMiddleware
-    from agent.config import RPC_URL, CONTRACT_ADDRESS
-    BET_PLACED_ABI = [{"type":"event","name":"BetPlaced","inputs":[{"name":"marketId","type":"bytes32","indexed":True},{"name":"user","type":"address","indexed":True},{"name":"isYes","type":"bool","indexed":False},{"name":"amount","type":"uint256","indexed":False}],"anonymous":False}]
-    CHUNK=99_000
-    db=get_conn()
+
+    CHUNK = 99_000
+    db = get_conn()
     db.executescript("""
-        CREATE TABLE IF NOT EXISTS chain_wallets (address TEXT PRIMARY KEY, first_seen_block INTEGER, first_seen_at TEXT DEFAULT (datetime('now')));
-        CREATE TABLE IF NOT EXISTS chain_cache (key TEXT PRIMARY KEY, value TEXT);
+        CREATE TABLE IF NOT EXISTS chain_wallets (
+            address TEXT PRIMARY KEY,
+            first_seen_block INTEGER,
+            first_seen_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS chain_cache (
+            key TEXT PRIMARY KEY, value TEXT
+        );
     """)
     db.commit()
-    row=db.execute("SELECT value FROM chain_cache WHERE key='last_block'").fetchone()
-    last_block=int(row[0]) if row else DEPLOY_BLOCK
-    row=db.execute("SELECT value FROM chain_cache WHERE key='stats'").fetchone()
-    cached=json.loads(row[0]) if row else {"tvl_usdc":0,"yes_volume_usdc":0,"no_volume_usdc":0,"yes_bets":0,"no_bets":0,"total_txns":0}
+
+    row    = db.execute("SELECT value FROM chain_cache WHERE key='stats'").fetchone()
+    cached = json.loads(row[0]) if row else {
+        "tvl_usdc":0,"yes_volume_usdc":0,"no_volume_usdc":0,
+        "yes_bets":0,"no_bets":0,"total_txns":0
+    }
+
     try:
-        w3=Web3(Web3.HTTPProvider(RPC_URL))
-        w3.middleware_onion.inject(ExtraDataToPOAMiddleware,layer=0)
-        contract=w3.eth.contract(address=Web3.to_checksum_address(CONTRACT_ADDRESS),abi=BET_PLACED_ABI)
-        latest=w3.eth.block_number
-        total_volume=int(cached["tvl_usdc"]*1_000_000); yes_volume=int(cached["yes_volume_usdc"]*1_000_000)
-        no_volume=int(cached["no_volume_usdc"]*1_000_000); yes_bets=cached["yes_bets"]; no_bets=cached["no_bets"]
-        total_txns=cached["total_txns"]; new_wallets=[]
-        start=last_block
-        while start<=latest:
-            end=min(start+CHUNK,latest)
-            events=contract.events.BetPlaced().get_logs(from_block=start,to_block=end)
-            for e in events:
-                amt=e["args"]["amount"]; isYes=e["args"]["isYes"]; user=e["args"]["user"].lower(); block=e["blockNumber"]
-                total_volume+=amt; total_txns+=1
-                if isYes: yes_volume+=amt; yes_bets+=1
-                else: no_volume+=amt; no_bets+=1
-                new_wallets.append((user,block))
-            start=end+1
+        w3 = Web3(Web3.HTTPProvider(RPC_URL))
+        w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+        latest = w3.eth.block_number
+
+        total_volume = int(cached["tvl_usdc"] * 1_000_000)
+        yes_volume   = int(cached["yes_volume_usdc"] * 1_000_000)
+        no_volume    = int(cached["no_volume_usdc"] * 1_000_000)
+        yes_bets     = cached["yes_bets"]
+        no_bets      = cached["no_bets"]
+        total_txns   = cached["total_txns"]
+        new_wallets  = []
+
+        # Scan both V1 and V2 for BetPlaced events
+        for ca, cache_key, deploy_block in [
+            (CONTRACT_ADDRESS_V1, "stats_last_block_v1", DEPLOY_BLOCK),
+            (CONTRACT_ADDRESS_V2, "stats_last_block_v2", DEPLOY_BLOCK_V2),
+        ]:
+            row2       = db.execute("SELECT value FROM chain_cache WHERE key=?", (cache_key,)).fetchone()
+            scan_from  = int(row2[0]) if row2 else deploy_block
+            contract   = w3.eth.contract(
+                address=Web3.to_checksum_address(ca), abi=BET_PLACED_ABI
+            )
+            start = scan_from
+            while start <= latest:
+                end    = min(start + CHUNK, latest)
+                events = contract.events.BetPlaced().get_logs(from_block=start, to_block=end)
+                for e in events:
+                    amt   = e["args"]["amount"]
+                    isYes = e["args"]["isYes"]
+                    user  = e["args"]["user"].lower()
+                    block = e["blockNumber"]
+                    total_volume += amt
+                    total_txns   += 1
+                    if isYes: yes_volume += amt; yes_bets += 1
+                    else:     no_volume  += amt; no_bets  += 1
+                    new_wallets.append((user, block))
+                start = end + 1
+            db.execute(
+                "INSERT OR REPLACE INTO chain_cache (key, value) VALUES (?,?)",
+                (cache_key, str(latest + 1))
+            )
+
         if new_wallets:
-            db.executemany("INSERT OR IGNORE INTO chain_wallets (address, first_seen_block) VALUES (?,?)", new_wallets)
-            db.commit()
-        unique_wallets=db.execute("SELECT COUNT(*) FROM chain_wallets").fetchone()[0]
-        result={"tvl_usdc":round(total_volume/1_000_000,4),"yes_volume_usdc":round(yes_volume/1_000_000,4),"no_volume_usdc":round(no_volume/1_000_000,4),"yes_bets":yes_bets,"no_bets":no_bets,"total_bets":yes_bets+no_bets,"unique_wallets":unique_wallets,"total_txns":total_txns,"blocks_scanned":latest-DEPLOY_BLOCK}
-        db.execute("INSERT OR REPLACE INTO chain_cache (key, value) VALUES ('stats', ?)",(json.dumps(result),))
-        db.execute("INSERT OR REPLACE INTO chain_cache (key, value) VALUES ('last_block', ?)",(str(latest+1),))
+            db.executemany(
+                "INSERT OR IGNORE INTO chain_wallets (address, first_seen_block) VALUES (?,?)",
+                new_wallets
+            )
+        db.commit()
+
+        unique_wallets = db.execute("SELECT COUNT(*) FROM chain_wallets").fetchone()[0]
+        result = {
+            "tvl_usdc":         round(total_volume / 1_000_000, 4),
+            "yes_volume_usdc":  round(yes_volume   / 1_000_000, 4),
+            "no_volume_usdc":   round(no_volume    / 1_000_000, 4),
+            "yes_bets":         yes_bets,
+            "no_bets":          no_bets,
+            "total_bets":       yes_bets + no_bets,
+            "unique_wallets":   unique_wallets,
+            "total_txns":       total_txns,
+            "blocks_scanned":   latest - DEPLOY_BLOCK,
+        }
+        db.execute(
+            "INSERT OR REPLACE INTO chain_cache (key, value) VALUES ('stats', ?)",
+            (json.dumps(result),)
+        )
         db.commit()
         return result
+
     except Exception as e:
-        if cached.get("tvl_usdc",0)>0:
-            unique_wallets=db.execute("SELECT COUNT(*) FROM chain_wallets").fetchone()[0]
-            cached["unique_wallets"]=unique_wallets
+        if cached.get("tvl_usdc", 0) > 0:
+            cached["unique_wallets"] = db.execute(
+                "SELECT COUNT(*) FROM chain_wallets"
+            ).fetchone()[0]
             return cached
-        return {"error":str(e),"tvl_usdc":0,"unique_wallets":0,"total_bets":0}
+        return {"error": str(e), "tvl_usdc": 0, "unique_wallets": 0, "total_bets": 0}
+
+
+@app.post("/admin/force-resolve/{market_id_hex}")
+def force_resolve_market(market_id_hex: str):
+    from web3 import Web3
+    from web3.middleware import ExtraDataToPOAMiddleware
+
+    outcome_map = {0:"UNRESOLVED",1:"YES",2:"NO",3:"VOID"}
+    version     = _market_contract_version(market_id_hex)
+    ca          = CONTRACT_ADDRESS_V2 if version == "v2" else CONTRACT_ADDRESS_V1
+    abi         = GETMARKET_ABI_V2    if version == "v2" else GETMARKET_ABI_V1
+
+    try:
+        w3 = Web3(Web3.HTTPProvider(RPC_URL))
+        w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+        c  = w3.eth.contract(address=Web3.to_checksum_address(ca), abi=abi)
+        b  = bytes.fromhex(market_id_hex.replace("0x", ""))
+        m  = c.functions.getMarket(b).call()
+        if m[9]:  # resolved
+            outcome = outcome_map.get(m[8], "UNKNOWN")
+            conn    = get_conn()
+            conn.execute(
+                "UPDATE markets SET resolved=1, outcome=? WHERE market_id_hex=?",
+                (outcome, market_id_hex)
+            )
+            conn.commit()
+            return {"ok": True, "outcome": outcome, "source": "onchain_sync", "version": version}
+        return {"ok": False, "reason": "Not yet resolved on-chain — agent will resolve shortly"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/admin/force-resolve-all")
+def force_resolve_all():
+    from web3 import Web3
+    from web3.middleware import ExtraDataToPOAMiddleware
+    import time
+
+    outcome_map = {0:"UNRESOLVED",1:"YES",2:"NO",3:"VOID"}
+    conn  = get_conn()
+    rows  = conn.execute(
+        "SELECT market_id_hex, contract_version FROM markets WHERE resolved=0 AND expiry_ts <= ?",
+        (int(time.time()),)
+    ).fetchall()
+
+    if not rows:
+        return {"ok": True, "fixed": 0, "message": "No stuck markets"}
+
+    try:
+        w3    = Web3(Web3.HTTPProvider(RPC_URL))
+        w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+        cv1   = w3.eth.contract(address=Web3.to_checksum_address(CONTRACT_ADDRESS_V1), abi=GETMARKET_ABI_V1)
+        cv2   = w3.eth.contract(address=Web3.to_checksum_address(CONTRACT_ADDRESS_V2), abi=GETMARKET_ABI_V2)
+        fixed = 0
+
+        for (mid, version) in rows:
+            try:
+                c       = cv2 if (version or "v1") == "v2" else cv1
+                b       = bytes.fromhex(mid.replace("0x", ""))
+                m       = c.functions.getMarket(b).call()
+                if m[9]:
+                    outcome = outcome_map.get(m[8], "UNKNOWN")
+                    conn.execute(
+                        "UPDATE markets SET resolved=1, outcome=? WHERE market_id_hex=?",
+                        (outcome, mid)
+                    )
+                    conn.commit()
+                    fixed += 1
+            except Exception:
+                continue
+
+        return {"ok": True, "fixed": fixed, "total": len(rows)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/bets/summary")
 def get_bets_summary():
@@ -503,86 +800,6 @@ def get_stuck_markets():
         (int(time.time()),)
     ).fetchall()
     return [dict(r) for r in rows]
-
-@app.post("/admin/force-resolve/{market_id_hex}")
-def force_resolve_market(market_id_hex: str):
-    """Force-sync a stuck market from on-chain state."""
-    from web3 import Web3
-    from web3.middleware import ExtraDataToPOAMiddleware
-    from agent.config import RPC_URL, CONTRACT_ADDRESS as CA
-    ABI = [{"type":"function","name":"getMarket","inputs":[{"name":"marketId","type":"bytes32"}],
-            "outputs":[{"name":"","type":"tuple","components":[
-                {"name":"id","type":"bytes32"},{"name":"pair","type":"string"},
-                {"name":"question","type":"string"},{"name":"threshold","type":"uint256"},
-                {"name":"isAbove","type":"bool"},{"name":"expiry","type":"uint256"},
-                {"name":"yesPool","type":"uint256"},{"name":"noPool","type":"uint256"},
-                {"name":"outcome","type":"uint8"},{"name":"resolved","type":"bool"},
-                {"name":"createdAt","type":"uint256"}]}],"stateMutability":"view"},
-           {"type":"function","name":"resolveMarket",
-            "inputs":[{"name":"marketId","type":"bytes32"},{"name":"finalRate","type":"uint256"}],
-            "outputs":[],"stateMutability":"nonpayable"}]
-    outcome_map = {0:"UNRESOLVED",1:"YES",2:"NO",3:"VOID"}
-    try:
-        w3 = Web3(Web3.HTTPProvider(RPC_URL))
-        w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
-        c = w3.eth.contract(address=Web3.to_checksum_address(CA), abi=ABI)
-        b = bytes.fromhex(market_id_hex.replace("0x",""))
-        m = c.functions.getMarket(b).call()
-        if m[9]:  # already resolved on-chain
-            outcome = outcome_map.get(m[8], "UNKNOWN")
-            conn = get_conn()
-            conn.execute("UPDATE markets SET resolved=1, outcome=? WHERE market_id_hex=?",
-                        (outcome, market_id_hex))
-            conn.commit()
-            return {"ok": True, "outcome": outcome, "source": "onchain_sync"}
-        # Not resolved on-chain yet — agent will handle it
-        return {"ok": False, "reason": "Not yet resolved on-chain — agent will resolve shortly"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/admin/force-resolve-all")
-def force_resolve_all():
-    """Sync all stuck markets from on-chain state at once."""
-    from web3 import Web3
-    from web3.middleware import ExtraDataToPOAMiddleware
-    from agent.config import RPC_URL, CONTRACT_ADDRESS as CA
-    import time
-    ABI = [{"type":"function","name":"getMarket","inputs":[{"name":"marketId","type":"bytes32"}],
-            "outputs":[{"name":"","type":"tuple","components":[
-                {"name":"id","type":"bytes32"},{"name":"pair","type":"string"},
-                {"name":"question","type":"string"},{"name":"threshold","type":"uint256"},
-                {"name":"isAbove","type":"bool"},{"name":"expiry","type":"uint256"},
-                {"name":"yesPool","type":"uint256"},{"name":"noPool","type":"uint256"},
-                {"name":"outcome","type":"uint8"},{"name":"resolved","type":"bool"},
-                {"name":"createdAt","type":"uint256"}]}],"stateMutability":"view"}]
-    outcome_map = {0:"UNRESOLVED",1:"YES",2:"NO",3:"VOID"}
-    conn = get_conn()
-    rows = conn.execute(
-        "SELECT market_id_hex FROM markets WHERE resolved=0 AND expiry_ts <= ?",
-        (int(time.time()),)
-    ).fetchall()
-    if not rows:
-        return {"ok": True, "fixed": 0, "message": "No stuck markets"}
-    try:
-        w3 = Web3(Web3.HTTPProvider(RPC_URL))
-        w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
-        c = w3.eth.contract(address=Web3.to_checksum_address(CA), abi=ABI)
-        fixed = 0
-        for (mid,) in rows:
-            try:
-                b = bytes.fromhex(mid.replace("0x",""))
-                m = c.functions.getMarket(b).call()
-                if m[9]:
-                    outcome = outcome_map.get(m[8], "UNKNOWN")
-                    conn.execute("UPDATE markets SET resolved=1, outcome=? WHERE market_id_hex=?",
-                                (outcome, mid))
-                    conn.commit()
-                    fixed += 1
-            except Exception:
-                continue
-        return {"ok": True, "fixed": fixed, "total": len(rows)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 # ── User Positions Cache ──────────────────────────────────────────
 
@@ -630,68 +847,3 @@ def _sync_user_bets(db, w3, contract, from_block, to_block):
         except Exception:
             pass
         start = end + 1
-
-@app.get("/positions/{address}")
-def get_user_positions(address: str):
-    from web3 import Web3
-    from web3.middleware import ExtraDataToPOAMiddleware
-    import sqlite3 as _sqlite3
-    from agent.config import RPC_URL, CONTRACT_ADDRESS
-
-    BET_PLACED_ABI = [{"type":"event","name":"BetPlaced","inputs":[
-        {"name":"marketId","type":"bytes32","indexed":True},
-        {"name":"user","type":"address","indexed":True},
-        {"name":"isYes","type":"bool","indexed":False},
-        {"name":"amount","type":"uint256","indexed":False}
-    ],"anonymous":False}]
-
-    db = _sqlite3.connect(DB_PATH)
-    db.row_factory = _sqlite3.Row
-    _ensure_user_bets_table(db)
-
-    row = db.execute("SELECT value FROM chain_cache WHERE key='bets_last_block'").fetchone()
-    scan_from = int(row[0]) if row else DEPLOY_BLOCK
-
-    try:
-        w3 = Web3(Web3.HTTPProvider(RPC_URL))
-        w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
-        latest = w3.eth.block_number
-        contract = w3.eth.contract(address=Web3.to_checksum_address(CONTRACT_ADDRESS), abi=BET_PLACED_ABI)
-        if scan_from <= latest:
-            _sync_user_bets(db, w3, contract, scan_from, latest)
-            db.execute("INSERT OR REPLACE INTO chain_cache (key, value) VALUES ('bets_last_block', ?)", (str(latest+1),))
-            db.commit()
-    except Exception:
-        pass
-
-    wallet = address.lower()
-    rows = db.execute(
-        """SELECT market_id, SUM(CASE WHEN is_yes=1 THEN amount ELSE 0 END) as yes_amt,
-                  SUM(CASE WHEN is_yes=0 THEN amount ELSE 0 END) as no_amt
-           FROM user_bets WHERE wallet=?
-           GROUP BY market_id""",
-        (wallet,)
-    ).fetchall()
-
-    if not rows:
-        return []
-
-    market_ids = [r[0] for r in rows]
-    placeholders = ",".join("?" * len(market_ids))
-    markets_rows = db.execute(
-        f"SELECT * FROM markets WHERE market_id_hex IN ({placeholders})", market_ids
-    ).fetchall()
-    markets_map = {m["market_id_hex"]: dict(m) for m in markets_rows}
-
-    result = []
-    for r in rows:
-        mid     = r[0]
-        yes_amt = r[1] or 0
-        no_amt  = r[2] or 0
-        m       = markets_map.get(mid)
-        if not m:
-            continue
-        result.append({"market_id": mid, "market": m, "yes_amt": yes_amt, "no_amt": no_amt})
-
-    db.close()
-    return result

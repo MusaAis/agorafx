@@ -68,15 +68,19 @@ async def fetch_eurc_usdc(client):
         fetch_eur_usd_exchangerate(client),
         fetch_eur_usd_coinbase(client),
     )
-    rates = [r for r, s in results if r is not None]
+    # Coinbase is the only live-tick source — prefer it if available
+    coinbase_rate = results[3][0]
+    if coinbase_rate is not None:
+        log.info(f"EURC/USDC = {coinbase_rate:.6f} from coinbase (live)")
+        return coinbase_rate, "coinbase"
+
+    # Fallback: median of the daily-refresh sources if Coinbase is down
+    rates = [r for r, s in results[:3] if r is not None]
     if not rates:
         return None, None
-    # Use median to filter outliers
     rates.sort()
     median = rates[len(rates)//2]
-    source = next(s for r, s in results if r == median or abs(r - median) < 0.001)
-    log.info(f"EURC/USDC consensus = {median:.6f} from {len(rates)} sources")
-    return median, source
+    return median, "daily_consensus_fallback"
 
 # ── NGN and other African currency sources ────────────────────────
 
