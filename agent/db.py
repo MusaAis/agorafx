@@ -52,6 +52,21 @@ def init_db():
             outcome       TEXT,
             created_at    TEXT    NOT NULL
         );
+        
+        CREATE TABLE IF NOT EXISTS x402_spend (
+            reasoning_hash  TEXT PRIMARY KEY,
+            action          TEXT NOT NULL,
+            url             TEXT NOT NULL,
+            pair            TEXT,
+            confidence      REAL,
+            cost_usdc       REAL NOT NULL DEFAULT 0,
+            rate            REAL,
+            spend_date      TEXT NOT NULL,
+            created_at      TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_x402_date   ON x402_spend (spend_date);
+        CREATE INDEX IF NOT EXISTS idx_x402_action ON x402_spend (action);
     """)
     conn.commit()
 
