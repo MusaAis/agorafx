@@ -1,0 +1,17 @@
+agorafx.db
+.env
+*.log
+__pycache__/
+claim_log.txt
+*.bak
+*.bak2
+*.db
+node_modules/
+cache/
+broadcast/
+output/
+recovery/
+*.deb
+*.pem
+register_entity_secret.*
+__pycache__/
