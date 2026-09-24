@@ -40,11 +40,13 @@ RATE_SCALE            = 1_000_000
 # ── Monitored pairs ───────────────────────────────────────────────
 MONITORED_PAIRS = [
     {"pair": "USDC/EURC", "source": "okx_eurusdt",      "label": "EURC/USDC"},
-    {"pair": "USDC/NGN",  "source": "flutterwave_ngn",  "label": "NGN per USDC"},
-    {"pair": "USDC/GHS",  "source": "exchangerate_ghs", "label": "GHS per USDC"},
-    {"pair": "USDC/KES",  "source": "exchangerate_kes", "label": "KES per USDC"},
-    {"pair": "USDC/ZAR",  "source": "exchangerate_zar", "label": "ZAR per USDC"},
-    {"pair": "USDC/EGP",  "source": "exchangerate_egp", "label": "EGP per USDC"},
+  # African pairs paused: no intraday rate source (daily snapshots only)
+   #Till futher notice
+    #{"pair": "USDC/NGN",  "source": "flutterwave_ngn",  "label": "NGN per USDC"},
+   # {"pair": "USDC/GHS",  "source": "exchangerate_ghs", "label": "GHS per USDC"},
+  #  {"pair": "USDC/KES",  "source": "exchangerate_kes", "label": "KES per USDC"},
+ #   {"pair": "USDC/ZAR",  "source": "exchangerate_zar", "label": "ZAR per USDC"},
+#    {"pair": "USDC/EGP",  "source": "exchangerate_egp", "label": "EGP per USDC"},
 ]
 
 # ── Circle Agent Wallet ───────────────────────────────────────────
