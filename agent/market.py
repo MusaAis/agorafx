@@ -123,7 +123,7 @@ async def create_market_onchain(decision: dict) -> str | None:
     threshold  = int(decision["threshold"])
     is_above   = bool(decision.get("is_above", True))
     expiry     = int(time.time()) + int(decision.get("expiry_offset_sec", 3600))
-    confidence = float(decision.get("confidence", 0.5))
+    confidence = min(max(float(decision.get("confidence", 50)), 0.0), 100.0) / 100.0
 
     confidence_scaled = int(min(max(confidence, 0.0), 1.0) * 1000)
     stake_units       = _compute_stake(confidence)

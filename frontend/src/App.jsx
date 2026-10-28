@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { ethers } from "ethers";                        import { shareOnX, shareMarket } from "./share.js";
-import { loadUserPositions, loadMarketPool, getProvider, CONTRACT_ADDRESS, USDC_ADDRESS } from "./onchain.js";
+import { loadUserPositions, loadMarketPool, getProvider, contractAddressFor, USDC_ADDRESS } from "./onchain.js";
 
 const API = "https://api.kudiarc.xyz";
 const PUBLIC_RPC = "https://rpc.testnet.arc.network";
@@ -69,14 +69,14 @@ function useWallet(){
     window.ethereum.on("chainChanged",()=>checkChain());
   },[fetchBalance]);
   useEffect(()=>{if(!account)return;const t=setInterval(()=>fetchBalance(account),15000);return()=>clearInterval(t);},[account,fetchBalance]);
-  const placeBet=async(mid,isYes,amt)=>{const p=new ethers.BrowserProvider(window.ethereum);const s=await p.getSigner();const u=new ethers.Contract(USDC_ADDRESS,USDC_ABI,s);const m=new ethers.Contract(CONTRACT_ADDRESS,MARKET_ABI,s);const a=ethers.parseUnits(amt.toString(),6);const al=await u.allowance(await s.getAddress(),CONTRACT_ADDRESS);if(al<a)await(await u.approve(CONTRACT_ADDRESS,a)).wait();const r=await(await m.placeBet(ethers.zeroPadValue(mid,32),isYes,a)).wait();setTimeout(()=>fetchBalance(account),3000);return r.hash;};
-  const claimWinnings=async(mid)=>{const p=new ethers.BrowserProvider(window.ethereum);const s=await p.getSigner();const c=new ethers.Contract(CONTRACT_ADDRESS,MARKET_ABI,s);const r=await(await c.claimWinnings(ethers.zeroPadValue(mid,32))).wait();setTimeout(()=>fetchBalance(account),3000);return r.hash;};
+  const placeBet=async(market,isYes,amt)=>{const addr=contractAddressFor(market);const mid=market.market_id_hex;const p=new ethers.BrowserProvider(window.ethereum);const s=await p.getSigner();const u=new ethers.Contract(USDC_ADDRESS,USDC_ABI,s);const m=new ethers.Contract(addr,MARKET_ABI,s);const a=ethers.parseUnits(amt.toString(),6);const al=await u.allowance(await s.getAddress(),addr);if(al<a)await(await u.approve(addr,a)).wait();const r=await(await m.placeBet(ethers.zeroPadValue(mid,32),isYes,a)).wait();setTimeout(()=>fetchBalance(account),3000);return r.hash;};
+  const claimWinnings=async(market)=>{const addr=contractAddressFor(market);const mid=market.market_id_hex;const p=new ethers.BrowserProvider(window.ethereum);const s=await p.getSigner();const c=new ethers.Contract(addr,MARKET_ABI,s);const r=await(await c.claimWinnings(ethers.zeroPadValue(mid,32))).wait();setTimeout(()=>fetchBalance(account),3000);return r.hash;};
   return{account,chainOk,loading,error,connect,switchToArc,placeBet,claimWinnings,usdcBalance,fetchBalance};
 }
 
-function usePool(mid){
+function usePool(mid,ver){
   const [pool,setPool]=useState({yes:0,no:0});
-  const load=useCallback(async()=>{const p=await loadMarketPool(mid);setPool(p);},[mid]);
+  const load=useCallback(async()=>{const p=await loadMarketPool(mid,ver);setPool(p);},[mid,ver]);
   useEffect(()=>{load();const t=setInterval(load,10000);return()=>clearInterval(t);},[load]);
   return{pool,refresh:load};
 }
@@ -174,8 +174,9 @@ function BetModal({market,side,wallet,onClose,onSuccess}){
   const [amount,setAmount]=useState("1");
   const [step,setStep]=useState("idle");
   const [txHash,setTxHash]=useState(null);
-  const {pool}=usePool(market.market_id_hex);
+  const {pool}=usePool(market.market_id_hex,market.contract_version);
   const isYes=side==="YES";
+  const minBet=market.contract_version==="v2"?0.1:1;
   const color=isYes?"var(--green)":"var(--red)";
   const prediction=parseFloat(amount)||0,cur=isYes?pool.yes:pool.no,tot=pool.yes+pool.no;
   const ns=cur+prediction*1e6,nt=tot+prediction*1e6;
@@ -186,7 +187,7 @@ function BetModal({market,side,wallet,onClose,onSuccess}){
   const submit=async()=>{
     if(!wallet.account){wallet.connect();return;}
     if(!wallet.chainOk){await wallet.switchToArc();return;}
-    try{setStep("approving");const h=await wallet.placeBet(market.market_id_hex,isYes,parseFloat(amount));setTxHash(h);setStep("done");onSuccess?.();}
+    if(!(parseFloat(amount)>=minBet)){setStep("error");return;}try{setStep("approving");const h=await wallet.placeBet(market,isYes,parseFloat(amount));setTxHash(h);setStep("done");onSuccess?.();}
     catch(e){console.error(e);setStep("error");}
   };
 
@@ -210,7 +211,7 @@ function BetModal({market,side,wallet,onClose,onSuccess}){
             </div>
           )}
         </div>
-        <input type="number" value={amount} min="1" step="1" onChange={e=>setAmount(e.target.value)} className="amount-input" style={{borderColor:`${color}55`}}/>
+        <input type="number" value={amount} min={minBet} step={minBet} onChange={e=>setAmount(e.target.value)} className="amount-input" style={{borderColor:`${color}55`}}/>
         <div className="quick-amounts">
           {["1","5","10","50"].map(v=>(
             <button key={v} onClick={()=>setAmount(v)} className="btn-quick" style={{background:amount===v?`${color}18`:"transparent",borderColor:amount===v?color:"var(--border)",color:amount===v?color:"var(--text-dim)",fontWeight:amount===v?700:400}}>{v}</button>
@@ -259,7 +260,7 @@ function StatCard({label,value,accent}){
 // ── MarketCard ────────────────────────────────────────────────
 function MarketCard({market,wallet,onRefresh}){
   const [prediction,setBet]=useState(null);
-  const {pool,refresh}=usePool(market.market_id_hex);
+  const {pool,refresh}=usePool(market.market_id_hex,market.contract_version);
   const tot=pool.yes+pool.no,yp=tot>0?((pool.yes/tot)*100).toFixed(0):50,np=tot>0?((pool.no/tot)*100).toFixed(0):50;
   const tvl=(tot/1e6).toFixed(2),ym=calcMult(pool.yes,tot),nm=calcMult(pool.no,tot);
   const res=market.resolved===1,exp=!res&&market.expiry_ts-Math.floor(Date.now()/1000)<=0;
@@ -332,7 +333,7 @@ function PositionCard({position,wallet,onClaimed}){
   const canClaim=res&&!ac&&!claimTx&&(won||voided);
   const statusColor=won?"var(--green)":lost?"var(--red)":voided?"var(--text-muted)":"var(--amber)";
   const statusText=won?"✓ Won":lost?"✕ Lost":voided?"↩ Void":"Open";
-  const handleClaim=async()=>{if(!wallet.account){wallet.connect();return;}if(!wallet.chainOk){await wallet.switchToArc();return;}setClaiming(true);setClaimErr(null);try{const h=await wallet.claimWinnings(m.market_id_hex);setClaimTx(h);onClaimed?.();}catch(e){console.error(e);setClaimErr(e?.reason||"Failed.");}finally{setClaiming(false);}};
+  const handleClaim=async()=>{if(!wallet.account){wallet.connect();return;}if(!wallet.chainOk){await wallet.switchToArc();return;}setClaiming(true);setClaimErr(null);try{const h=await wallet.claimWinnings(m);setClaimTx(h);onClaimed?.();}catch(e){console.error(e);setClaimErr(e?.reason||"Failed.");}finally{setClaiming(false);}};
   return(
     <div className="position-card" style={{borderColor:canClaim?(won?"rgba(0,200,100,0.25)":"rgba(150,150,150,0.25)"):lost?"rgba(255,80,80,0.15)":"var(--border)"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -405,7 +406,7 @@ function MyBets({wallet,markets}){
     // Process one at a time — each needs its own signature, stop on user rejection
     for(const p of claimable){
       try{
-        await wallet.claimWinnings(p.market.market_id_hex);
+        await wallet.claimWinnings(p.market);
       }catch(e){
         // If user rejected wallet signature, stop the whole loop
         if(e?.code===4001||e?.code==="ACTION_REJECTED"){break;}

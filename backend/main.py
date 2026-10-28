@@ -19,9 +19,17 @@ from fastapi.responses import JSONResponse
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agent.db import get_conn, init_db
 import logging
-from fastapi import FastAPI, HTTPException, Request
+import hmac
+from fastapi import FastAPI, Header, HTTPException, Request
 
 log = logging.getLogger("backend")
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+
+
+def require_admin(x_admin_token: str = Header(default="")):
+    if not ADMIN_TOKEN or not hmac.compare_digest(x_admin_token.encode(), ADMIN_TOKEN.encode()):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
 
 app = FastAPI(title="AgoraFX API", version="2.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -63,7 +71,7 @@ GETMARKET_ABI_V2 = [{"type":"function","name":"getMarket",
         {"name":"yesPool","type":"uint256"},{"name":"noPool","type":"uint256"},
         {"name":"outcome","type":"uint8"},{"name":"resolved","type":"bool"},
         {"name":"createdAt","type":"uint256"},{"name":"agentAddress","type":"address"},
-        {"name":"agentStake","type":"uint256"},{"name":"confidence","type":"uint256"},
+        {"name":"agentStake","type":"uint256"},{"name":"agentCollateral","type":"uint256"},{"name":"confidence","type":"uint256"},
         {"name":"stakeSettled","type":"bool"}]}],"stateMutability":"view"},
     {"type":"function","name":"resolveMarket",
      "inputs":[{"name":"marketId","type":"bytes32"},{"name":"finalRate","type":"uint256"}],
@@ -440,13 +448,13 @@ def get_agent_status():
         "uptime": "active" if running else "stopped",
     }
 
-@app.post("/agent/pause")
+@app.post("/agent/pause", dependencies=[Depends(require_admin)])
 def pause_agent():
     import subprocess
     subprocess.run(["sudo","systemctl","stop","agorafx"], capture_output=True)
     return {"ok": True}
 
-@app.post("/agent/resume")
+@app.post("/agent/resume", dependencies=[Depends(require_admin)])
 def resume_agent():
     import subprocess
     subprocess.run(["sudo","systemctl","start","agorafx"], capture_output=True)
@@ -530,7 +538,7 @@ def get_user_positions(address: str):
             row = db.execute(
                 "SELECT value FROM chain_cache WHERE key=?", (cache_key,)
             ).fetchone()
-            scan_from = int(row[0]) if row else DEPLOY_BLOCK
+            scan_from = int(row[0]) if row else deploy_block
             try:
                 contract = w3.eth.contract(
                     address=Web3.to_checksum_address(ca), abi=BET_PLACED_ABI
@@ -542,10 +550,10 @@ def get_user_positions(address: str):
                         (cache_key, str(latest + 1))
                     )
                     db.commit()
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as e:
+                log.warning("bet sync failed for %s: %s", cache_key, e)
+    except Exception as e:
+        log.warning("positions sync failed: %s", e)
 
     wallet = address.lower()
     rows = db.execute(
@@ -685,7 +693,7 @@ def get_chain_stats_v5():
         return {"error": str(e), "tvl_usdc": 0, "unique_wallets": 0, "total_bets": 0}
 
 
-@app.post("/admin/force-resolve/{market_id_hex}")
+@app.post("/admin/force-resolve/{market_id_hex}", dependencies=[Depends(require_admin)])
 def force_resolve_market(market_id_hex: str):
     from web3 import Web3
     from web3.middleware import ExtraDataToPOAMiddleware
@@ -715,7 +723,7 @@ def force_resolve_market(market_id_hex: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/admin/force-resolve-all")
+@app.post("/admin/force-resolve-all", dependencies=[Depends(require_admin)])
 def force_resolve_all():
     from web3 import Web3
     from web3.middleware import ExtraDataToPOAMiddleware
@@ -819,6 +827,7 @@ def _ensure_user_bets_table(db):
         );
         CREATE INDEX IF NOT EXISTS idx_user_bets_wallet ON user_bets(wallet);
         CREATE INDEX IF NOT EXISTS idx_user_bets_market ON user_bets(market_id);
+        CREATE TABLE IF NOT EXISTS chain_cache (key TEXT PRIMARY KEY, value TEXT);
     """)
     db.commit()
 
@@ -827,23 +836,22 @@ def _sync_user_bets(db, w3, contract, from_block, to_block):
     start = from_block
     while start <= to_block:
         end = min(start + CHUNK, to_block)
-        try:
-            events = contract.events.BetPlaced().get_logs(from_block=start, to_block=end)
-            rows = []
-            for e in events:
-                mid  = "0x" + e["args"]["marketId"].hex()
-                user = e["args"]["user"].lower()
-                isYes= 1 if e["args"]["isYes"] else 0
-                amt  = e["args"]["amount"]
-                blk  = e["blockNumber"]
-                tx   = e["transactionHash"].hex()
-                rows.append((mid, user, isYes, amt, blk, tx))
-            if rows:
-                db.executemany(
-                    "INSERT OR IGNORE INTO user_bets (market_id, wallet, is_yes, amount, block_num, tx_hash) VALUES (?,?,?,?,?,?)",
-                    rows
-                )
-                db.commit()
-        except Exception:
-            pass
+        events = contract.events.BetPlaced().get_logs(from_block=start, to_block=end)
+        rows = [
+            (
+                "0x" + e["args"]["marketId"].hex(),
+                e["args"]["user"].lower(),
+                1 if e["args"]["isYes"] else 0,
+                e["args"]["amount"],
+                e["blockNumber"],
+                e["transactionHash"].hex(),
+            )
+            for e in events
+        ]
+        if rows:
+            db.executemany(
+                "INSERT OR IGNORE INTO user_bets (market_id, wallet, is_yes, amount, block_num, tx_hash) VALUES (?,?,?,?,?,?)",
+                rows,
+            )
+            db.commit()
         start = end + 1

@@ -1,30 +1,4 @@
-"""
-Decision Engine — runs every 5 minutes.
-
-v3 changes (fixes EURC positional bias bug found June 29):
-- ROOT CAUSE FOUND: previous version showed the LLM all 6 pairs in one prompt
-  and asked it to pick ONE to respond about. The model defaulted to whichever
-  pair appeared first in MONITORED_PAIRS (USDC/EURC) almost every single time
-  due to LLM primacy bias — 720/731 decisions over 5 days were logged against
-  EURC specifically, even when reasoning text said "momentum unclear for all
-  pairs." NGN/GHS/KES/ZAR/EGP were getting essentially zero real evaluation.
-- FIX: the LLM now runs ONCE PER PAIR per cycle, with a focused single-pair
-  prompt. No pair competes with another for "selection." Every pair gets a
-  genuine, independent decision every cycle. Pair order is also shuffled each
-  cycle so even residual model bias can't anchor to list position.
-- This also fixes the fallback gate: _consecutive_llm_holds() was always
-  returning 0 for non-EURC pairs (since they had zero decision rows at all),
-  which silently meant fallback NEVER fired for them either — they were
-  getting no markets from either source. Now every pair accumulates real
-  decision history, so the fallback gate works as originally designed.
-
-v2 changes (post-Lepton judge feedback) — retained:
-- LLM decisions use memory of recent history per pair (own track record)
-- Asymmetric confidence thresholds — raises the bar after recent misses
-- Real abstention — LLM can explicitly HOLD on ambiguous signal
-- Fallback tagged source="fallback" vs source="llm" — honest, auditable
-- Fallback only fires after sustained genuine LLM holds on that specific pair
-"""
+"""Decision engine: one focused LLM evaluation per pair each cycle."""
 
 import os
 import json, logging, random
@@ -131,12 +105,10 @@ def _consecutive_llm_holds(pair: str) -> int:
 def _recent_decision_history(pair: str, n: int = 5) -> list[dict]:
     conn = get_conn()
     rows = conn.execute(
-        """SELECT d.action, d.confidence, d.is_above, d.reasoning, d.created_at,
-                  m.resolved, m.outcome
+        """SELECT d.action, d.confidence, m.resolved, m.outcome
            FROM decisions d
-           LEFT JOIN markets m
-             ON m.pair = d.pair AND m.created_at = d.created_at
-           WHERE d.pair=? AND d.source='llm'
+           JOIN markets m ON m.market_id_hex = d.market_id_hex
+           WHERE d.pair=? AND d.source='llm' AND d.action='create_market'
            ORDER BY d.id DESC LIMIT ?""",
         (pair, n)
     ).fetchall()
@@ -145,13 +117,18 @@ def _recent_decision_history(pair: str, n: int = 5) -> list[dict]:
 
 def _format_history_for_prompt(history: list[dict]) -> str:
     if not history:
-        return "no prior decisions on this pair"
+        return "no prior markets on this pair"
     lines = []
     for h in history:
-        outcome = "unresolved"
-        if h.get("resolved"):
-            outcome = "CORRECT" if h.get("outcome") == h.get("is_above") else "WRONG"
-        lines.append(f"  - {h['action']} conf={h['confidence']} -> {outcome}")
+        if not h.get("resolved"):
+            verdict = "unresolved"
+        elif h.get("outcome") == "YES":
+            verdict = "CORRECT"
+        elif h.get("outcome") == "NO":
+            verdict = "WRONG"
+        else:
+            verdict = "VOID"
+        lines.append(f"  - {h['action']} conf={h['confidence']} -> {verdict}")
     return "\n".join(lines)
 
 
@@ -178,21 +155,26 @@ def _build_single_pair_prompt(pair: str, rates: list, momentum: float) -> str:
 
 
 def _insert_decision(pair, action, reasoning, threshold=None, is_above=True,
-                      confidence=0, source="llm"):
+                     confidence=0, source="llm"):
     conn = get_conn()
-    try:
-        conn.execute(
-            """INSERT INTO decisions
-               (pair, action, reasoning, threshold, is_above, confidence, source, created_at)
-               VALUES (?,?,?,?,?,?,?,datetime('now'))""",
-            (pair, action, reasoning, threshold, int(is_above), confidence, source)
-        )
-    except Exception:
-        conn.execute(
-            """INSERT INTO decisions (pair, action, reasoning, threshold, is_above, created_at)
-               VALUES (?,?,?,?,?,datetime('now'))""",
-            (pair, action, reasoning, threshold, int(is_above))
-        )
+    cur = conn.execute(
+        """INSERT INTO decisions
+           (pair, action, reasoning, threshold, is_above, confidence, source, created_at)
+           VALUES (?,?,?,?,?,?,?,datetime('now'))""",
+        (pair, action, reasoning, threshold, int(is_above), confidence, source)
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def link_decision_market(decision_id, market_id_hex):
+    if not decision_id or not market_id_hex:
+        return
+    conn = get_conn()
+    conn.execute(
+        "UPDATE decisions SET market_id_hex=? WHERE id=?",
+        (market_id_hex, decision_id)
+    )
     conn.commit()
 
 
@@ -310,7 +292,7 @@ async def run_decision_cycle() -> dict | None:
 
         log.info(f"🤖 LLM [{action}] {pair} {reasoning} (confidence: {confidence}%)")
 
-        _insert_decision(
+        decision_id = _insert_decision(
             pair=pair, action=action, reasoning=reasoning,
             threshold=decision.get("threshold"), is_above=decision.get("is_above", True),
             confidence=confidence, source="llm",
@@ -320,6 +302,8 @@ async def run_decision_cycle() -> dict | None:
             required = ["question", "threshold", "is_above", "expiry_offset_sec"]
             if all(f in decision for f in required):
                 decision["pair"] = pair
+                decision["confidence"] = confidence
+                decision["decision_id"] = decision_id
                 market_to_create = _clean_question(decision)
                 # Don't break — still evaluate remaining pairs so their
                 # decisions get logged too. Only the first create wins this cycle.
@@ -379,7 +363,7 @@ async def build_scheduled_market() -> dict | None:
             f"({direction_str}): {question}"
         )
 
-        _insert_decision(
+        decision_id = _insert_decision(
             pair=pair, action="create_market",
             reasoning=f"Fallback after {hold_streak} consecutive LLM holds — {direction_str}",
             threshold=threshold, is_above=is_above, confidence=30,
@@ -387,6 +371,7 @@ async def build_scheduled_market() -> dict | None:
         )
 
         return {"action":"create_market","pair":pair,"question":question,
-                "threshold":threshold,"is_above":is_above,"expiry_offset_sec":3600}
+                "threshold":threshold,"is_above":is_above,"expiry_offset_sec":3600,
+                "confidence":30,"decision_id":decision_id}
     return None
 

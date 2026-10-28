@@ -12,7 +12,7 @@ import sys
 from .config   import DECISION_INTERVAL_SEC, RESOLVER_INTERVAL_SEC
 from .db       import init_db
 from .monitor  import run_monitor
-from .decision import run_decision_cycle, build_scheduled_market
+from .decision import run_decision_cycle, build_scheduled_market, link_decision_market
 from .market   import create_market_onchain, resolve_expired_markets
 
 # ── Logging ────────────────────────────────────────────────────────
@@ -47,6 +47,7 @@ async def decision_loop():
                 log.info(f"Opening market: {decision['question']}")
                 market_id = await create_market_onchain(decision)
                 if market_id:
+                    link_decision_market(decision.get("decision_id"), market_id)
                     log.info(f"✅ Market live: {market_id}")
                 else:
                     log.error("❌ Market creation failed")

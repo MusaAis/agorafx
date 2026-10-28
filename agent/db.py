@@ -17,6 +17,23 @@ def get_conn() -> sqlite3.Connection:
     return _local.conn
 
 
+def _ensure_columns(conn):
+    wanted = {
+        "decisions": [
+            ("confidence", "INTEGER DEFAULT 0"),
+            ("source", "TEXT DEFAULT 'llm'"),
+            ("market_id_hex", "TEXT"),
+        ],
+        "markets": [("contract_version", "TEXT DEFAULT 'v1'")],
+    }
+    for table, cols in wanted.items():
+        have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for name, ddl in cols:
+            if name not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_decisions_market ON decisions (market_id_hex)")
+
+
 def init_db():
     conn = get_conn()
     conn.executescript("""
@@ -37,6 +54,8 @@ def init_db():
             threshold     INTEGER,
             is_above      INTEGER,
             market_id_hex TEXT,
+            confidence    INTEGER DEFAULT 0,
+            source        TEXT    DEFAULT 'llm',
             created_at    TEXT    NOT NULL
         );
 
@@ -70,6 +89,7 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_x402_date   ON x402_spend (spend_date);
         CREATE INDEX IF NOT EXISTS idx_x402_action ON x402_spend (action);
     """)
+    _ensure_columns(conn)
     conn.commit()
 
 
