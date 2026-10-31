@@ -207,10 +207,10 @@ const STEPS = [
 
 // Not a sequence — just what's behind each tab, so no numbers here
 const APP_TABS = [
-  { title:"Markets",    icon:"◎", color:"#00c878", desc:"Live AI-created markets across 6 African currency pairs. Place YES or NO on where each rate is heading." },
+  { title:"Markets",    icon:"◎", color:"#00c878", desc:"Live AI-created markets on EUR/USD (EURC/USDC). Place YES or NO on where the rate is heading." },
   { title:"Positions",  icon:"◈", color:"#4aa8f0", desc:"Every prediction you've placed, active and settled, with one tap to claim USDC winnings." },
   { title:"Agent Feed", icon:"▦", color:"#f0a030", desc:"The agent's decisions as they happen — signal purchases, markets created, resolutions — each with a SHA-256 reasoning hash." },
-  { title:"Signals",    icon:"✦", color:"#a78bfa", desc:"African analyst FX commentary. Pay $0.05 to read one, or publish your own and earn $0.04 per reader, instantly on-chain." },
+  { title:"Signals",    icon:"✦", color:"#a78bfa", desc:"Analyst FX commentary. Pay $0.05 to read one, or publish your own and earn $0.04 per reader, instantly on-chain." },
 ];
 
 const NAV_LINKS = [
@@ -405,7 +405,7 @@ export default function Home({ onLaunchApp }) {
           lineHeight:1.1, letterSpacing:"-1.5px",
           margin:"0 0 20px", maxWidth:700,
         }}>
-          African FX intelligence,<br/>
+          FX intelligence,<br/>
           <span style={{ color:"var(--amber)" }}>priced per signal.</span>
         </h1>
 
@@ -414,7 +414,7 @@ export default function Home({ onLaunchApp }) {
           color:"var(--text-secondary)", lineHeight:1.7,
           maxWidth:560, margin:"0 0 36px",
         }}>
-          An autonomous AI agent monitors 6 African currency pairs 24/7, pays for its own data at $0.001 per signal, and stakes real USDC on every market it creates. African analysts earn $0.04 per article — every payment settled in USDC on Arc using SHA256 hash.
+          An autonomous AI agent monitors EUR/USD around the clock, pays for its own data at $0.001 per signal, and stakes real USDC on every market it creates. Analysts earn $0.04 per article read — every payment settled in USDC on Arc.
         </p>
 
         {/* CTAs */}
@@ -513,7 +513,7 @@ export default function Home({ onLaunchApp }) {
                 The AI Agent runs everything
               </div>
               <div style={{ fontSize:13, color:"var(--text-dim)", lineHeight:1.7 }}>
-                A Python agent powered by Groq / Llama 3.3 monitors 6 African FX pairs every 5 minutes, detects momentum,
+                A Python agent powered by Groq monitors EURC/USDC every 5 minutes, detects momentum,
                 pays $0.001 per signal from its own Circle wallet via x402, then creates and resolves markets on-chain.
                 Zero human intervention. Every decision logged with a SHA-256 hash.
               </div>
@@ -661,7 +661,7 @@ export default function Home({ onLaunchApp }) {
                     FX intelligence, priced per read
                   </h2>
                   <p style={{ fontSize:13, color:"var(--text-dim)", marginTop:8, lineHeight:1.6 }}>
-                    African analysts publish FX signals. Readers pay $0.05 USDC to unlock. Analyst earns $0.04 instantly, on-chain.
+                    Analysts publish FX signals. Readers pay $0.05 USDC to unlock. Analyst earns $0.04 instantly, on-chain.
                   </p>
                 </div>
                 <button
@@ -753,7 +753,7 @@ export default function Home({ onLaunchApp }) {
               Agora<span style={{ color:"var(--amber)" }}>FX</span>
             </span>
             <span style={{ fontSize:11, color:"var(--text-dim)" }}>
-              · African FX Intelligence · Arc Testnet
+              · FX Intelligence · Arc Testnet
             </span>
           </div>
           <div style={{ display:"flex", alignItems:"center", gap:16, flexWrap:"wrap" }}>

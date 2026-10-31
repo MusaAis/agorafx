@@ -1,7 +1,7 @@
 /**
  * AgoraFX — Signals Tab (v2-Phase 4 / RFB-06)
  *
- * African analysts publish FX articles.
+ * Analysts publish FX articles.
  * Readers pay $0.05 USDC via x402 (EIP-712, Arc Testnet).
  * Analyst earns $0.04 (80%) — immediate on-chain USDC transfer.
  *

@@ -23,7 +23,7 @@ export function shareOnX(market, side, amount) {
 
 export function shareMarket(market) {
   const text = [
-    `🌍 African FX Prediction Market is live on AgoraFX`,
+    `🌍 FX Prediction Market is live on AgoraFX`,
     ``,
     `"${market.question}"`,
     ``,

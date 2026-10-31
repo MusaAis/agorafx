@@ -183,7 +183,7 @@ function Header({latest,wallet}){
         <div className="logo-block">
           <div className="logo-text">Agora<span style={{color:"var(--amber)"}}>FX</span></div>
           <div style={{display:"flex",alignItems:"center",gap:6,marginTop:3}}>
-            <span style={{fontSize:9,color:"var(--text-dim)",letterSpacing:"1.5px",textTransform:"uppercase"}}>African FX</span>
+            <span style={{fontSize:9,color:"var(--text-dim)",letterSpacing:"1.5px",textTransform:"uppercase"}}>FX Markets</span>
             <span style={{fontSize:8,background:"rgba(0,200,120,0.12)",color:"var(--green)",border:"1px solid rgba(0,200,120,0.25)",borderRadius:4,padding:"1px 6px",letterSpacing:"1px",textTransform:"uppercase",fontWeight:700}}>Testnet</span>
           </div>
         </div>
