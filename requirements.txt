@@ -1,0 +1,9 @@
+web3==7.16.0
+eth-account==0.13.7
+httpx>=0.28.1,<1
+requests==2.31.0
+python-dotenv==1.0.1
+fastapi==0.111.1
+uvicorn==0.30.1
+groq==1.2.0
+x402[httpx,evm]==2.13.0

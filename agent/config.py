@@ -33,7 +33,9 @@ RESOLVER_INTERVAL_SEC = 60
 
 # ── Market params ─────────────────────────────────────────────────
 MARKET_DURATION_SEC   = 3600
-MIN_RATE_CHANGE_PCT   = 0.15
+MOMENTUM_MIN_PCT       = float(os.getenv("MOMENTUM_MIN_PCT", "0.05"))
+MOMENTUM_BAND_LOW_PCT  = float(os.getenv("MOMENTUM_BAND_LOW_PCT", "0.03"))
+MOMENTUM_BAND_HIGH_PCT = float(os.getenv("MOMENTUM_BAND_HIGH_PCT", "0.08"))
 DECISION_LOOKBACK     = 20
 RATE_SCALE            = 1_000_000
 
@@ -64,7 +66,6 @@ MIN_WALLET_BALANCE_USDC     = 0.05
 
 # ── x402 ─────────────────────────────────────────────────────────
 BACKEND_URL              = os.getenv("BACKEND_URL", "http://localhost:8000")
-X402_FACILITATOR_URL     = os.getenv("X402_FACILITATOR_URL", "https://facilitator.circle.com")
 X402_SIGNAL_PRICE_USDC   = float(os.getenv("X402_SIGNAL_PRICE_USDC",  "0.001"))
 X402_ARTICLE_PRICE_USDC  = float(os.getenv("X402_ARTICLE_PRICE_USDC", "0.05"))
 X402_RECEIVER_ADDRESS    = os.getenv("X402_RECEIVER_ADDRESS", AGENT_WALLET_ADDRESS)

@@ -23,14 +23,18 @@ Payment flow
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
+import json
 import logging
 import os
 import time
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from eth_account import Account
+from eth_account.messages import encode_defunct
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from web3 import Web3
@@ -204,6 +208,32 @@ async def _async_payout(analyst_wallet: str, payment_id: str, analyst_share_unit
     await asyncio.to_thread(_send_analyst_payout, analyst_wallet, payment_id, analyst_share_units)
 
 
+AUTH_MAX_AGE_SEC = 86400
+
+
+def wallet_from_auth(token: str) -> str:
+    """Return the wallet that signed a valid, unexpired session token."""
+    try:
+        data    = json.loads(base64.b64decode(token + "=="))
+        wallet  = str(data["wallet"]).lower()
+        expires = int(data["expires"])
+        sig     = str(data["signature"])
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid wallet auth")
+
+    now = int(time.time())
+    if expires < now or expires > now + AUTH_MAX_AGE_SEC + 60:
+        raise HTTPException(status_code=401, detail="Wallet auth expired")
+
+    message = f"AgoraFX wallet session\nwallet:{wallet}\nexpires:{expires}"
+    try:
+        recovered = Account.recover_message(encode_defunct(text=message), signature=sig)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid wallet signature")
+    if recovered.lower() != wallet:
+        raise HTTPException(status_code=401, detail="Wallet signature mismatch")
+    return wallet
+
 # ── Pydantic models ───────────────────────────────────────────────────────────
 
 class PublishArticle(BaseModel):
@@ -217,12 +247,11 @@ class PublishArticle(BaseModel):
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.post("")
-def publish_article(body: PublishArticle):
-    """
-    Publish an FX intelligence article. Free to submit. Author wallet is
-    self-declared — no auth required (hackathon scope). In production this
-    would require a signed message proving wallet ownership.
-    """
+def publish_article(body: PublishArticle, x_wallet_auth: str = Header(default="")):
+    """Publish an FX intelligence article. Requires a signed wallet session."""
+    wallet = wallet_from_auth(x_wallet_auth)
+    if body.author_wallet.lower() != wallet:
+        raise HTTPException(status_code=403, detail="author_wallet does not match signed wallet")
     if not body.title.strip():
         raise HTTPException(status_code=400, detail="title required")
     if not body.content.strip():
@@ -375,7 +404,7 @@ def article_payment_status(article_id: str, reader: str):
 
 
 @router.get("/{article_id}/read")
-def read_article_bypass(article_id: str, reader: str):
+def read_article_bypass(article_id: str, reader: str = "", x_wallet_auth: str = Header(default="")):
     """
     Wallet-verified re-read endpoint — no x402 payment required.
     Returns full article content if the reader wallet already paid.
@@ -384,12 +413,14 @@ def read_article_bypass(article_id: str, reader: str):
     and restore the article without charging again. Works across devices,
     tab switches, refreshes, and wallet switches.
 
-    GET /intelligence/{id}/read?reader=0x...
+    GET /intelligence/{id}/read   (X-Wallet-Auth header required)
     → {"paid": false}                          — not paid, frontend shows paywall
     → {"paid": true, "content": "...", ...}    — paid, frontend shows article
     """
-    if not reader or not reader.startswith("0x"):
-        raise HTTPException(status_code=400, detail="reader wallet address required")
+    wallet = wallet_from_auth(x_wallet_auth)
+    if reader and reader.lower() != wallet:
+        raise HTTPException(status_code=403, detail="reader does not match signed wallet")
+    reader = wallet
 
     conn = get_conn()
 

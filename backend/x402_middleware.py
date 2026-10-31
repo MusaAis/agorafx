@@ -77,7 +77,7 @@ def _requirements(cfg: dict) -> dict:
     }
 
 
-async def _settle(payment_payload: dict, cfg: dict) -> tuple[bool, str]:
+async def _settle(payment_payload: dict, cfg: dict) -> tuple[bool, str, str]:
     requirements = _requirements(cfg)["accepts"][0]
 
     wrapped_payload = {
@@ -118,15 +118,16 @@ async def _settle(payment_payload: dict, cfg: dict) -> tuple[bool, str]:
                            .get("authorization", {})
                            .get("from", "")
             )
-            log.info("Gateway settled: payer=%s tx=%s", payer, data.get("transaction"))
-            return True, payer
+            tx = str(data.get("transaction") or "")
+            log.info("Gateway settled: payer=%s tx=%s", payer, tx)
+            return True, payer, tx
         else:
             log.warning("Gateway settle failed %s: %s", status, text[:300])
-            return False, ""
+            return False, "", ""
 
     except Exception as e:
-        log.error("x402 facilitator call failed: %s", e)
-        return False, ""
+        log.error("Gateway settle request failed: %s", e)
+        return False, "", ""
 
 
 def make_x402_guard(
@@ -190,7 +191,7 @@ def make_x402_guard(
                 headers={"Access-Control-Expose-Headers": expose},
             )
 
-        settled, payer = await _settle(payment_payload, cfg)
+        settled, payer, tx = await _settle(payment_payload, cfg)
 
         if not settled:
             raise HTTPException(
@@ -202,6 +203,7 @@ def make_x402_guard(
                 },
             )
 
+        request.state.x402_tx = tx
         return payer
 
     return _guard

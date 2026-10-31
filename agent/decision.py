@@ -26,15 +26,18 @@ def _next_groq_client():
         _key_cycle = itertools.cycle(keys)
     return AsyncGroq(api_key=next(_key_cycle))
 
-from .config import GROQ_API_KEY, DECISION_LOOKBACK, MONITORED_PAIRS
+from .config import (
+    GROQ_API_KEY, DECISION_LOOKBACK, MONITORED_PAIRS,
+    MOMENTUM_MIN_PCT, MOMENTUM_BAND_LOW_PCT, MOMENTUM_BAND_HIGH_PCT,
+)
 from .db     import get_recent_rates, insert_decision, get_conn
 
 log = logging.getLogger("decision")
 
 FALLBACK_HOLD_THRESHOLD = 6   # at 5min cycles ≈ 30 min of genuine LLM inaction
 
-AMBIGUOUS_MOMENTUM_LOW  = 0.10
-AMBIGUOUS_MOMENTUM_HIGH = 0.20
+AMBIGUOUS_MOMENTUM_LOW  = MOMENTUM_BAND_LOW_PCT
+AMBIGUOUS_MOMENTUM_HIGH = MOMENTUM_BAND_HIGH_PCT
 
 # Single-pair focused prompt — no competition with other pairs for "selection"
 SYSTEM_PROMPT = """You are AgoraFX — an AI agent creating African FX prediction markets on Arc blockchain.
@@ -42,13 +45,14 @@ SYSTEM_PROMPT = """You are AgoraFX — an AI agent creating African FX predictio
 You are evaluating ONE specific currency pair right now. You are shown:
 1. Live rate momentum for this pair only
 2. Your own recent decision history for this exact pair (what you decided, your confidence, and whether each resolved market was correct)
+3. A paid market signal for this pair, when one was purchased this cycle
 
 Decide whether to open a market for THIS pair only.
 
 Rules:
-- Only act (create_market) if momentum is clear (>=0.15%) AND your recent track record on this pair does not suggest you should be more cautious.
+- Only act (create_market) if momentum is clear (>=__MIN__%) AND your recent track record on this pair does not suggest you should be more cautious.
 - If your last 2 decisions on this pair were WRONG, raise your effective confidence bar — require stronger momentum or explicitly HOLD instead.
-- If momentum is in the ambiguous band (0.10%-0.20%), prefer HOLD unless your recent history on this pair has been accurate — explain this tradeoff in your reasoning.
+- If momentum is in the ambiguous band (__LOW__%-__HIGH__%), prefer HOLD unless your recent history on this pair has been accurate — explain this tradeoff in your reasoning.
 - Confidence must reflect genuine certainty given momentum AND track record — not just momentum size. Strong momentum with a recent wrong call should NOT get a high confidence score.
 - It is correct and expected to HOLD often. Do not force a directional guess to "have something to report."
 
@@ -68,6 +72,13 @@ IMPORTANT question formatting:
 - EURC/USDC: round to 4 decimal places. Example: 1.1606 not 1.16061662
 - Always use comma thousands separator for fiat amounts"""
 
+SYSTEM_PROMPT = (
+    SYSTEM_PROMPT
+    .replace("__MIN__", f"{MOMENTUM_MIN_PCT:g}")
+    .replace("__LOW__", f"{MOMENTUM_BAND_LOW_PCT:g}")
+    .replace("__HIGH__", f"{MOMENTUM_BAND_HIGH_PCT:g}")
+)
+
 
 def _last_market_direction(pair: str) -> bool | None:
     conn = get_conn()
@@ -75,6 +86,13 @@ def _last_market_direction(pair: str) -> bool | None:
         "SELECT is_above FROM markets WHERE pair=? ORDER BY id DESC LIMIT 1", (pair,)
     ).fetchone()
     return bool(row["is_above"]) if row else None
+
+
+def _has_active_market(pair: str) -> bool:
+    row = get_conn().execute(
+        "SELECT COUNT(*) FROM markets WHERE resolved=0 AND pair=?", (pair,)
+    ).fetchone()
+    return bool(row and row[0])
 
 
 def _calc_momentum(rates: list) -> float:
@@ -132,7 +150,8 @@ def _format_history_for_prompt(history: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _build_single_pair_prompt(pair: str, rates: list, momentum: float) -> str:
+def _build_single_pair_prompt(pair: str, rates: list, momentum: float,
+                              signal: dict | None = None) -> str:
     """Focused prompt for exactly one pair — no other pairs shown, no selection bias possible."""
     now    = datetime.now(timezone.utc).strftime("%H:%M UTC")
     diff   = rates[-1]["rate"] - rates[0]["rate"]
@@ -143,12 +162,21 @@ def _build_single_pair_prompt(pair: str, rates: list, momentum: float) -> str:
     history_str = _format_history_for_prompt(_recent_decision_history(pair, n=3))
     ambiguous   = AMBIGUOUS_MOMENTUM_LOW <= momentum <= AMBIGUOUS_MOMENTUM_HIGH
 
+    signal_line = ""
+    if signal and signal.get("pair") == pair:
+        signal_line = (
+            f"Paid signal: {signal.get('direction', '?')} "
+            f"{signal.get('rate_change_pct', 0)}% over {signal.get('lookback_points', 0)} points, "
+            f"strength {signal.get('confidence', 0)}\n"
+        )
+
     return (
         f"{now}\n"
         f"Pair: {pair}\n"
         f"Momentum: {trend} {momentum:.3f}%{' [AMBIGUOUS BAND]' if ambiguous else ''}\n"
         f"Latest rate: {latest}\n"
         f"Recent snapshots: {snaps}\n"
+        f"{signal_line}"
         f"Recent history on this pair:\n{history_str}\n"
         f"Open market for {pair}?"
     )
@@ -265,6 +293,8 @@ async def run_decision_cycle() -> dict | None:
     else:
         log.info("x402 %s — proceeding with cached rates", signal_result["action"])
 
+    signal = signal_result["data"] if signal_result["action"] == "PAID" else None
+
     pairs_to_check = MONITORED_PAIRS.copy()
     random.shuffle(pairs_to_check)  # no positional bias — order changes every cycle
 
@@ -279,7 +309,7 @@ async def run_decision_cycle() -> dict | None:
             continue
 
         momentum = _calc_momentum(rates)
-        prompt   = _build_single_pair_prompt(pair, rates, momentum)
+        prompt   = _build_single_pair_prompt(pair, rates, momentum, signal)
 
         decision = await _call_groq(prompt)
         if decision is None:
@@ -298,7 +328,7 @@ async def run_decision_cycle() -> dict | None:
             confidence=confidence, source="llm",
         )
 
-        if action == "create_market" and market_to_create is None:
+        if action == "create_market" and market_to_create is None and not _has_active_market(pair):
             required = ["question", "threshold", "is_above", "expiry_offset_sec"]
             if all(f in decision for f in required):
                 decision["pair"] = pair

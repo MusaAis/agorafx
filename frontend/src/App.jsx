@@ -1,15 +1,22 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { ethers } from "ethers";                        import { shareOnX, shareMarket } from "./share.js";
-import { loadUserPositions, loadMarketPool, getProvider, contractAddressFor, USDC_ADDRESS } from "./onchain.js";
+import { ethers } from "ethers";
+import { shareOnX, shareMarket } from "./share.js";
+import { loadPositionsFromAPI, loadAllUserPositions, loadMarketPool, getProvider, contractAddressFor, USDC_ADDRESS } from "./onchain.js";
+import Signals from "./Signals.jsx";
+import Home from "./Home.jsx";
 
-const API = "https://api.kudiarc.xyz";
+const API = import.meta.env.VITE_API_URL || "https://api.kudiarc.xyz";
 const PUBLIC_RPC = "https://rpc.testnet.arc.network";
-const ARC_CHAIN = {                                       chainId:"0x4cef52",chainName:"Arc Testnet",
+const ARC_CHAIN = {
+  chainId:"0x4cef52",chainName:"Arc Testnet",
   nativeCurrency:{name:"USDC",symbol:"USDC",decimals:6},
-  rpcUrls:[PUBLIC_RPC],blockExplorerUrls:["https://testnet.arcscan.app"],                                       };
-                                                        const MARKET_ABI = [
-  {type:"function",name:"placeBet",inputs:[{name:"marketId",type:"bytes32"},{name:"isYes",type:"bool"},{name:"amount",type:"uint256"}],outputs:[],stateMutability:"nonpayable"},                                                  {type:"function",name:"claimWinnings",inputs:[{name:"marketId",type:"bytes32"}],outputs:[],stateMutability:"nonpayable"},
+  rpcUrls:[PUBLIC_RPC],blockExplorerUrls:["https://testnet.arcscan.app"],
+};
+
+const MARKET_ABI = [
+  {type:"function",name:"placeBet",inputs:[{name:"marketId",type:"bytes32"},{name:"isYes",type:"bool"},{name:"amount",type:"uint256"}],outputs:[],stateMutability:"nonpayable"},
+  {type:"function",name:"claimWinnings",inputs:[{name:"marketId",type:"bytes32"}],outputs:[],stateMutability:"nonpayable"},
   {type:"function",name:"getMarket",inputs:[{name:"marketId",type:"bytes32"}],outputs:[{name:"",type:"tuple",components:[{name:"id",type:"bytes32"},{name:"pair",type:"string"},{name:"question",type:"string"},{name:"threshold",type:"uint256"},{name:"isAbove",type:"bool"},{name:"expiry",type:"uint256"},{name:"yesPool",type:"uint256"},{name:"noPool",type:"uint256"},{name:"outcome",type:"uint8"},{name:"resolved",type:"bool"},{name:"createdAt",type:"uint256"}]}],stateMutability:"view"},
   {type:"function",name:"getPosition",inputs:[{name:"marketId",type:"bytes32"},{name:"user",type:"address"}],outputs:[{name:"",type:"tuple",components:[{name:"yesAmount",type:"uint256"},{name:"noAmount",type:"uint256"},{name:"claimed",type:"bool"}]}],stateMutability:"view"},
 ];
@@ -69,14 +76,28 @@ function useWallet(){
     window.ethereum.on("chainChanged",()=>checkChain());
   },[fetchBalance]);
   useEffect(()=>{if(!account)return;const t=setInterval(()=>fetchBalance(account),15000);return()=>clearInterval(t);},[account,fetchBalance]);
-  const placeBet=async(market,isYes,amt)=>{const addr=contractAddressFor(market);const mid=market.market_id_hex;const p=new ethers.BrowserProvider(window.ethereum);const s=await p.getSigner();const u=new ethers.Contract(USDC_ADDRESS,USDC_ABI,s);const m=new ethers.Contract(addr,MARKET_ABI,s);const a=ethers.parseUnits(amt.toString(),6);const al=await u.allowance(await s.getAddress(),addr);if(al<a)await(await u.approve(addr,a)).wait();const r=await(await m.placeBet(ethers.zeroPadValue(mid,32),isYes,a)).wait();setTimeout(()=>fetchBalance(account),3000);return r.hash;};
-  const claimWinnings=async(market)=>{const addr=contractAddressFor(market);const mid=market.market_id_hex;const p=new ethers.BrowserProvider(window.ethereum);const s=await p.getSigner();const c=new ethers.Contract(addr,MARKET_ABI,s);const r=await(await c.claimWinnings(ethers.zeroPadValue(mid,32))).wait();setTimeout(()=>fetchBalance(account),3000);return r.hash;};
+  const placeBet = async (market, isYes, amt) => {
+    const mid           = market.market_id_hex;
+    const contractAddr  = contractAddressFor(market); // picks V1 or V2
+  
+    const p  = new ethers.BrowserProvider(window.ethereum);
+    const s  = await p.getSigner();
+    const u  = new ethers.Contract(USDC_ADDRESS, USDC_ABI, s);
+    const m  = new ethers.Contract(contractAddr, MARKET_ABI, s);
+    const a  = ethers.parseUnits(amt.toString(), 6);
+    const al = await u.allowance(await s.getAddress(), contractAddr);
+    if (al < a) await (await u.approve(contractAddr, a)).wait();
+    const r = await (await m.placeBet(ethers.zeroPadValue(mid, 32), isYes, a)).wait();
+    setTimeout(() => fetchBalance(account), 3000);
+    return r.hash;
+  };
+  const claimWinnings=async(market)=>{const mid=market.market_id_hex;const p=new ethers.BrowserProvider(window.ethereum);const s=await p.getSigner();const c=new ethers.Contract(contractAddressFor(market),MARKET_ABI,s);const r=await(await c.claimWinnings(ethers.zeroPadValue(mid,32))).wait();setTimeout(()=>fetchBalance(account),3000);return r.hash;};
   return{account,chainOk,loading,error,connect,switchToArc,placeBet,claimWinnings,usdcBalance,fetchBalance};
 }
 
-function usePool(mid,ver){
+function usePool(market){
   const [pool,setPool]=useState({yes:0,no:0});
-  const load=useCallback(async()=>{const p=await loadMarketPool(mid,ver);setPool(p);},[mid,ver]);
+  const load=useCallback(async()=>{const p=await loadMarketPool(market.market_id_hex, market.contract_version);setPool(p);},[market.market_id_hex, market.contract_version]);
   useEffect(()=>{load();const t=setInterval(load,10000);return()=>clearInterval(t);},[load]);
   return{pool,refresh:load};
 }
@@ -161,7 +182,10 @@ function Header({latest,wallet}){
       <div className="header-inner">
         <div className="logo-block">
           <div className="logo-text">Agora<span style={{color:"var(--amber)"}}>FX</span></div>
-          <div className="logo-sub">African FX · Arc Testnet</div>
+          <div style={{display:"flex",alignItems:"center",gap:6,marginTop:3}}>
+            <span style={{fontSize:9,color:"var(--text-dim)",letterSpacing:"1.5px",textTransform:"uppercase"}}>African FX</span>
+            <span style={{fontSize:8,background:"rgba(0,200,120,0.12)",color:"var(--green)",border:"1px solid rgba(0,200,120,0.25)",borderRadius:4,padding:"1px 6px",letterSpacing:"1px",textTransform:"uppercase",fontWeight:700}}>Testnet</span>
+          </div>
         </div>
         <WalletButton wallet={wallet}/>
       </div>
@@ -174,7 +198,7 @@ function BetModal({market,side,wallet,onClose,onSuccess}){
   const [amount,setAmount]=useState("1");
   const [step,setStep]=useState("idle");
   const [txHash,setTxHash]=useState(null);
-  const {pool}=usePool(market.market_id_hex,market.contract_version);
+  const {pool}=usePool(market);
   const isYes=side==="YES";
   const minBet=market.contract_version==="v2"?0.1:1;
   const color=isYes?"var(--green)":"var(--red)";
@@ -187,7 +211,8 @@ function BetModal({market,side,wallet,onClose,onSuccess}){
   const submit=async()=>{
     if(!wallet.account){wallet.connect();return;}
     if(!wallet.chainOk){await wallet.switchToArc();return;}
-    if(!(parseFloat(amount)>=minBet)){setStep("error");return;}try{setStep("approving");const h=await wallet.placeBet(market,isYes,parseFloat(amount));setTxHash(h);setStep("done");onSuccess?.();}
+    if(!(parseFloat(amount)>=minBet)){setStep("error");return;}
+    try{setStep("approving");const h=await wallet.placeBet(market, isYes, parseFloat(amount));setTxHash(h);setStep("done");onSuccess?.();}
     catch(e){console.error(e);setStep("error");}
   };
 
@@ -260,7 +285,7 @@ function StatCard({label,value,accent}){
 // ── MarketCard ────────────────────────────────────────────────
 function MarketCard({market,wallet,onRefresh}){
   const [prediction,setBet]=useState(null);
-  const {pool,refresh}=usePool(market.market_id_hex,market.contract_version);
+  const {pool,refresh}=usePool(market);
   const tot=pool.yes+pool.no,yp=tot>0?((pool.yes/tot)*100).toFixed(0):50,np=tot>0?((pool.no/tot)*100).toFixed(0):50;
   const tvl=(tot/1e6).toFixed(2),ym=calcMult(pool.yes,tot),nm=calcMult(pool.no,tot);
   const res=market.resolved===1,exp=!res&&market.expiry_ts-Math.floor(Date.now()/1000)<=0;
@@ -378,22 +403,17 @@ function MyBets({wallet,markets}){
   const running=useRef(false);
 
   const load=useCallback(async()=>{
-    if(!wallet.account||!markets.length)return;
+    if(!wallet.account)return;
     if(running.current)return;
     running.current=true;
     try{
-      // Scan all markets — active first, then resolved
-      const relevant=[
-        ...markets.filter(m=>!m.resolved),           // all active
-        ...markets.filter(m=>m.resolved).slice(0,100) // last 100 resolved
-      ];
-      const res=await loadUserPositions(wallet.account,relevant);
+      const res=await loadPositionsFromAPI(wallet.account,API);
       let staked=0,won=0,lost=0,open=0,unclaimed=0;
       for(const p of res){const{market:m,side,amt,potentialPayout,claimed}=p;staked+=amt/1e6;if(m.resolved&&m.outcome===side){won+=potentialPayout;if(!claimed)unclaimed+=potentialPayout;}else if(m.resolved&&m.outcome==="VOID"){if(!claimed)unclaimed+=amt/1e6;}else if(m.resolved&&m.outcome!==side){lost+=amt/1e6;}else{open+=amt/1e6;}}
       setPositions(res);setTotals({staked,won,lost,open,unclaimed});
     }catch(e){console.error(e);}
     finally{setInit(false);running.current=false;}
-  },[wallet.account,markets]);
+  },[wallet.account]);
 
   useEffect(()=>{load();},[load]);
   useEffect(()=>{const t=setInterval(load,30000);return()=>clearInterval(t);},[load]);
@@ -477,18 +497,51 @@ function MyBets({wallet,markets}){
 // ── AgentFeed ─────────────────────────────────────────────────
 function AgentFeed(){
   const [feed,setFeed]=useState([]);
+  const [x402Feed,setX402Feed]=useState(null); // null = not loaded yet
+  const [x402Meta,setX402Meta]=useState({total_paid_usdc:0,paid_count:0});
   const [loading,setLoading]=useState(true);
+  const [x402Loading,setX402Loading]=useState(false);
   const [feedFilter,setFeedFilter]=useState("all");
-  const load=useCallback(async()=>{try{const d=await fetch(`${API}/agent/activity?limit=25`).then(x=>x.json());setFeed(d);}catch{}finally{setLoading(false);};},[]);
+
+  const load=useCallback(async()=>{
+    try{const d=await fetch(`${API}/agent/activity?limit=25`).then(x=>x.json());setFeed(d);}
+    catch{}finally{setLoading(false);}
+  },[]);
+
+  const loadX402=useCallback(async()=>{
+    if(x402Loading)return;
+    setX402Loading(true);
+    try{
+      const d=await fetch(`${API}/agent/decisions?limit=50`).then(x=>x.json());
+      setX402Feed(Array.isArray(d.decisions)?d.decisions:[]);
+      setX402Meta({total_paid_usdc:d.total_paid_usdc||0,paid_count:d.paid_count||0});
+    }catch{
+      setX402Feed([]);
+    }finally{setX402Loading(false);}
+  },[]);
+
   useEffect(()=>{load();const t=setInterval(load,15000);return()=>clearInterval(t);},[load]);
 
-  const filteredFeed=feedFilter==="all"?feed:feed.filter(item=>
-    feedFilter==="resolved"?(item.action==="resolved"&&item.resolved):
-    feedFilter==="market"?(item.action==="create_market"||item.action==="created"):
-    item.action==="hold"
+  useEffect(()=>{
+    if(feedFilter!=="x402")return;
+    if(x402Feed===null)loadX402();
+    const t=setInterval(loadX402,20000);
+    return()=>clearInterval(t);
+  },[feedFilter,loadX402,x402Feed]);
+
+  const filteredFeed=
+    feedFilter==="all"?feed:
+    feedFilter==="resolved"?feed.filter(item=>item.action==="resolved"&&item.resolved):
+    feedFilter==="market"?feed.filter(item=>item.action==="create_market"||item.action==="created"):
+    feedFilter==="hold"?feed.filter(item=>item.action==="hold"):
+    [];
+
+  const shortHash=(h)=>h?`${h.slice(0,10)}…${h.slice(-8)}`:"—";
+
+  if(loading&&feedFilter!=="x402")return(
+    <div className="empty-state"><div style={{color:"var(--text-dim)",fontSize:13}}>Loading feed…</div></div>
   );
 
-  if(loading)return<div className="empty-state"><div style={{color:"var(--text-dim)",fontSize:13}}>Loading feed…</div></div>;
   return(
     <div className="feed-card">
       <div className="feed-header">
@@ -496,41 +549,218 @@ function AgentFeed(){
         <span style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>Agent Activity</span>
         <span style={{fontSize:10,color:"var(--text-dim)",marginLeft:"auto"}}>Live · 15s</span>
       </div>
+
+      {/* Tab bar */}
       <div style={{display:"flex",gap:0,padding:"0 12px",borderBottom:"1px solid var(--border)",overflowX:"auto"}}>
-        {[["all","All"],["resolved","Resolved"],["market","Created"],["hold","Hold"]].map(([key,label])=>(
-          <button key={key} onClick={()=>setFeedFilter(key)} style={{background:"none",border:"none",cursor:"pointer",padding:"8px 12px",fontSize:11,fontFamily:"'Outfit',sans-serif",fontWeight:feedFilter===key?700:500,whiteSpace:"nowrap",color:feedFilter===key?"var(--text)":"var(--text-muted)",borderBottom:feedFilter===key?"2px solid var(--amber)":"2px solid transparent",marginBottom:-1,transition:"all 0.15s"}}>
-            {label}
-          </button>
-        ))}
-        <span style={{marginLeft:"auto",fontSize:10,color:"var(--text-dim)",display:"flex",alignItems:"center",paddingRight:4}}>{filteredFeed.length} events</span>
+        {[
+          ["all","All"],
+          ["resolved","Resolved"],
+          ["market","Created"],
+          ["hold","Hold"],
+          ["x402","x402"],
+        ].map(([key,label])=>{
+          const isX402=key==="x402";
+          const active=feedFilter===key;
+          return(
+            <button key={key} onClick={()=>setFeedFilter(key)} style={{
+              background:"none",border:"none",cursor:"pointer",
+              padding:"8px 12px",fontSize:11,
+              fontFamily:"'Outfit',sans-serif",
+              fontWeight:active?700:500,
+              whiteSpace:"nowrap",
+              color:active?(isX402?"var(--amber)":"var(--text)"):"var(--text-muted)",
+              borderBottom:active?"2px solid var(--amber)":"2px solid transparent",
+              marginBottom:-1,transition:"all 0.15s",
+            }}>{label}</button>
+          );
+        })}
+        <span style={{marginLeft:"auto",fontSize:10,color:"var(--text-dim)",display:"flex",alignItems:"center",paddingRight:4}}>
+          {feedFilter==="x402"
+            ?x402Feed===null?"…":`${x402Feed.length} decisions`
+            :`${filteredFeed.length} events`
+          }
+        </span>
       </div>
-      <div className="feed-list">
-        {filteredFeed.length===0
-          ?<div style={{color:"var(--text-dim)",fontSize:13,padding:"24px",textAlign:"center"}}>No activity</div>
-          :filteredFeed.map((item,i)=>{
-            const isRes=item.action==="resolved"&&item.resolved;
-            const isCreate=item.action==="create_market"||item.action==="created";
-            const isHold=item.action==="hold";
-            const color=isRes?(item.outcome==="YES"?"var(--green)":item.outcome==="NO"?"var(--red)":"var(--text-muted)"):isCreate?"var(--green)":isHold?"var(--text-dim)":"var(--text-muted)";
-            return(
-              <div key={i} className={`feed-item ${i===0?"feed-item-latest":""}`}>
-                <span style={{fontSize:16,flexShrink:0,marginTop:1}}>{item.icon||"●"}</span>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:5,flexWrap:"wrap"}}>
-                    <span className="badge" style={{background:`${color}15`,color,borderColor:`${color}30`}}>{item.label||item.action}</span>
-                    <span className="mono" style={{fontSize:10,color:"var(--text-dim)"}}>{item.pair}</span>
-                    {item.confidence>0&&!isHold&&<span style={{fontSize:10,color:"var(--text-dim)",marginLeft:"auto"}}>signal: {item.confidence}%</span>}
-                    {item.tx_hash&&<a href={`https://testnet.arcscan.app/tx/${item.tx_hash}`} target="_blank" rel="noreferrer" className="arcscan-link">↗</a>}
-                  </div>
-                  <div className="feed-msg" style={{color:isRes&&item.outcome==="YES"?"rgba(0,200,100,0.6)":isRes&&item.outcome==="NO"?"rgba(255,80,80,0.6)":"var(--text-dim)"}}>
-                    {item.message||item.reasoning||"—"}
-                  </div>
-                  <div style={{fontSize:10,color:"var(--text-dim)",marginTop:4,opacity:0.6}}>{ago(item.created_at)}</div>
+
+      {/* ── x402 tab ──────────────────────────────────────────── */}
+      {feedFilter==="x402"&&(
+        <>
+          {/* Summary bar — 3 stats across the top */}
+          {x402Feed!==null&&x402Feed.length>0&&(
+            <div style={{
+              display:"flex",gap:0,
+              borderBottom:"1px solid var(--border)",
+              background:"rgba(255,255,255,0.015)",
+            }}>
+              {[
+                {label:"Paid calls",value:x402Meta.paid_count,color:"var(--green)"},
+                {label:"Total spent",value:`$${Number(x402Meta.total_paid_usdc).toFixed(4)}`,color:"var(--amber)"},
+                {label:"$/call",value:`$${x402Meta.paid_count>0?(x402Meta.total_paid_usdc/x402Meta.paid_count).toFixed(4):"0.0010"}`,color:"var(--blue)"},
+              ].map(({label,value,color},i,arr)=>(
+                <div key={label} style={{flex:1,padding:"10px 14px",borderRight:i<arr.length-1?"1px solid var(--border)":"none"}}>
+                  <div style={{fontSize:9,color:"var(--text-dim)",letterSpacing:"1.5px",textTransform:"uppercase",marginBottom:3}}>{label}</div>
+                  <div style={{fontSize:13,fontWeight:700,color,fontFamily:"'IBM Plex Mono',monospace"}}>{value}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="feed-list">
+            {x402Feed===null||(x402Loading&&x402Feed.length===0)?(
+              <div style={{color:"var(--text-dim)",fontSize:13,padding:"32px",textAlign:"center"}}>
+                Loading x402 log…
+              </div>
+            ):x402Feed.length===0?(
+              <div style={{padding:"40px 18px",textAlign:"center"}}>
+                <div style={{fontSize:28,marginBottom:10}}>⚡</div>
+                <div style={{fontSize:13,color:"var(--text-muted)",fontWeight:600,marginBottom:4}}>No x402 decisions yet</div>
+                <div style={{fontSize:11,color:"var(--text-dim)",lineHeight:1.6}}>
+                  Agent pays $0.001 per rate signal.<br/>PAID / CACHED / HOLD decisions appear here.
                 </div>
               </div>
-            );
-          })}
-      </div>
+            ):(
+              x402Feed.map((item,i)=>{
+                const action=(item.action||"").toUpperCase();
+                const isPaid=action==="PAID";
+                const isCached=action==="CACHED";
+                const badgeColor=isPaid?"var(--green)":isCached?"var(--blue)":"var(--text-muted)";
+                const icon=isPaid?"💳":isCached?"⚡":"🤔";
+                const hash=item.reasoning_hash||null;
+                const pairColor={
+                  "USDC/NGN":"#4aa8f0","USDC/GHS":"#00c878","USDC/KES":"#00c878",
+                  "USDC/ZAR":"#f0a030","USDC/EGP":"#f0a030","USDC/EURC":"#a78bfa",
+                }[item.pair]||"var(--text-muted)";
+
+                return(
+                  <div key={i} className={`feed-item ${i===0?"feed-item-latest":""}`}>
+                    <span style={{fontSize:15,flexShrink:0,marginTop:2}}>{icon}</span>
+                    <div style={{flex:1,minWidth:0}}>
+
+                      {/* Row 1: action + pair + cost + rate */}
+                      <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:5,flexWrap:"wrap"}}>
+                        <span style={{
+                          fontSize:9,padding:"2px 8px",borderRadius:4,border:"1px solid",
+                          letterSpacing:"1.2px",textTransform:"uppercase",fontWeight:700,flexShrink:0,
+                          background:`${badgeColor}15`,color:badgeColor,borderColor:`${badgeColor}30`,
+                        }}>{action}</span>
+
+                        {item.pair&&(
+                          <span style={{
+                            fontSize:9,padding:"2px 7px",borderRadius:4,border:"1px solid",
+                            letterSpacing:"1px",textTransform:"uppercase",fontWeight:600,flexShrink:0,
+                            background:`${pairColor}12`,color:pairColor,borderColor:`${pairColor}25`,
+                          }}>{item.pair}</span>
+                        )}
+
+                        {isPaid&&item.cost_usdc!=null&&(
+                          <span style={{
+                            fontSize:10,color:"var(--amber)",
+                            fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,
+                          }}>${Number(item.cost_usdc).toFixed(4)}</span>
+                        )}
+
+                        {item.rate!=null&&(
+                          <span style={{
+                            fontSize:10,color:"var(--text-dim)",
+                            fontFamily:"'IBM Plex Mono',monospace",marginLeft:"auto",
+                          }}>
+                            {Number(item.rate).toFixed(item.pair==="USDC/EURC"?4:2)}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Row 2: confidence bar */}
+                      {item.confidence!=null&&(
+                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
+                          <div style={{
+                            flex:1,height:3,borderRadius:2,
+                            background:"var(--border)",overflow:"hidden",maxWidth:100,
+                          }}>
+                            <div style={{
+                              height:"100%",borderRadius:2,
+                              width:`${Math.min(item.confidence,100)}%`,
+                              background:isPaid?"var(--green)":isCached?"var(--blue)":"var(--text-dim)",
+                              transition:"width 0.3s ease",
+                            }}/>
+                          </div>
+                          <span style={{fontSize:9,color:"var(--text-dim)"}}>
+                            signal {item.confidence}%
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Row 3: SHA256 hash chip — the x402 audit trail */}
+                      {hash&&(
+                        <div style={{
+                          display:"inline-flex",alignItems:"center",gap:6,
+                          background:"rgba(255,255,255,0.025)",
+                          border:"1px solid var(--border)",
+                          borderRadius:5,padding:"3px 8px",marginBottom:4,
+                          maxWidth:"100%",overflow:"hidden",
+                        }}>
+                          <span style={{
+                            fontSize:8,color:"var(--text-dim)",
+                            letterSpacing:"1px",textTransform:"uppercase",flexShrink:0,
+                          }}>sha256</span>
+                          <span style={{
+                            fontSize:10,fontFamily:"'IBM Plex Mono',monospace",
+                            color:isPaid?"rgba(0,200,120,0.65)":isCached?"rgba(74,168,240,0.65)":"var(--text-dim)",
+                            overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",
+                          }}>{shortHash(hash)}</span>
+                          <button
+                            onClick={()=>navigator.clipboard.writeText(hash)}
+                            title="Copy full hash"
+                            style={{
+                              background:"none",border:"none",cursor:"pointer",
+                              color:"var(--text-dim)",fontSize:9,padding:"0 2px",
+                              lineHeight:1,flexShrink:0,
+                            }}>⧉</button>
+                        </div>
+                      )}
+
+                      {/* Row 4: timestamp */}
+                      <div style={{fontSize:10,color:"var(--text-dim)",opacity:0.55}}>
+                        {ago(item.created_at)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ── Standard activity tabs ────────────────────────────── */}
+      {feedFilter!=="x402"&&(
+        <div className="feed-list">
+          {filteredFeed.length===0
+            ?<div style={{color:"var(--text-dim)",fontSize:13,padding:"24px",textAlign:"center"}}>No activity</div>
+            :filteredFeed.map((item,i)=>{
+              const isRes=item.action==="resolved"&&item.resolved;
+              const isCreate=item.action==="create_market"||item.action==="created";
+              const isHold=item.action==="hold";
+              const color=isRes?(item.outcome==="YES"?"var(--green)":item.outcome==="NO"?"var(--red)":"var(--text-muted)"):isCreate?"var(--green)":isHold?"var(--text-dim)":"var(--text-muted)";
+              return(
+                <div key={i} className={`feed-item ${i===0?"feed-item-latest":""}`}>
+                  <span style={{fontSize:16,flexShrink:0,marginTop:1}}>{item.icon||"●"}</span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:5,flexWrap:"wrap"}}>
+                      <span className="badge" style={{background:`${color}15`,color,borderColor:`${color}30`}}>{item.label||item.action}</span>
+                      <span className="mono" style={{fontSize:10,color:"var(--text-dim)"}}>{item.pair}</span>
+                      {item.confidence>0&&!isHold&&<span style={{fontSize:10,color:"var(--text-dim)",marginLeft:"auto"}}>signal: {item.confidence}%</span>}
+                      {item.tx_hash&&<a href={`https://testnet.arcscan.app/tx/${item.tx_hash}`} target="_blank" rel="noreferrer" className="arcscan-link">↗</a>}
+                    </div>
+                    <div className="feed-msg" style={{color:isRes&&item.outcome==="YES"?"rgba(0,200,100,0.6)":isRes&&item.outcome==="NO"?"rgba(255,80,80,0.6)":"var(--text-dim)"}}>
+                      {item.message||item.reasoning||"—"}
+                    </div>
+                    <div style={{fontSize:10,color:"var(--text-dim)",marginTop:4,opacity:0.6}}>{ago(item.created_at)}</div>
+                  </div>
+                </div>
+              );
+            })}
+        </div>
+      )}
     </div>
   );
 }
@@ -542,12 +772,20 @@ export default function App(){
   const [latest,setLatest]=useState(null);
   const [tab,setTab]=useState("markets");
   const wallet=useWallet();
+  const [view, setView] = useState("home"); // "home" | "app"
 
   const load=useCallback(async()=>{try{const[s,m,lr]=await Promise.all([fetch(`${API}/stats`).then(x=>x.json()),fetch(`${API}/markets?limit=2000`).then(x=>x.json()),fetch(`${API}/rates/latest`).then(x=>x.json())]);setStats(s);setMarkets(m);setLatest(lr);}catch(e){console.error(e);}},[]);
   useEffect(()=>{load();},[load]);
   useEffect(()=>{const t=setInterval(load,15000);return()=>clearInterval(t);},[load]);
 
   const active=markets.filter(m=>!m.resolved);
+
+  // ── Homepage view ──────────────────────────────────────────────────────────
+  if (view === "home") {
+    return (
+      <Home onLaunchApp={() => setView("app")} />
+    );
+  }
 
   return(<>
     <style>{`
@@ -820,15 +1058,16 @@ export default function App(){
           <StatCard label="Active"    value={stats.markets.active}        accent="var(--green)"/>
           <StatCard label="Resolved"  value={stats.markets.resolved}      accent="var(--blue)"/>
           <StatCard label="Decisions" value={stats.agent.total_decisions} accent="var(--text-secondary)"/>
-          <StatCard label="Created"   value={stats.agent.markets_created} accent="var(--amber)"/>
+          <StatCard label="Created"   value={stats.markets.total} accent="var(--amber)"/>
         </div>
       )}
 
       <div className="tab-bar">
         {[
-          ["markets", `Markets${active.length?` (${active.length})`:""}`],
-          ["mybets",  "Positions"],
-          ["feed",    "Agent Feed"],
+          ["markets",      `Markets${active.length?` (${active.length})`:""}`],
+          ["mybets",       "Positions"],
+          ["feed",         "Feed"],
+          ["intelligence", "Signals"],
         ].map(([key,label])=>(
           <button key={key} onClick={()=>setTab(key)} className={`tab-btn ${tab===key?"active":""}`}>
             {label}
@@ -867,44 +1106,38 @@ export default function App(){
 
       {tab==="mybets"&&<div className="fade"><MyBets wallet={wallet} markets={markets}/></div>}
       {tab==="feed"&&<div className="fade"><AgentFeed/></div>}
+      {tab==="intelligence"&&<div className="fade"><Signals wallet={wallet}/></div>}
 
-      <footer className="site-footer">
-        <div className="footer-inner">
-          <div className="footer-top">
-            <div className="footer-brand">
-              <div className="footer-logo">Agora<span>FX</span></div>
-              <p className="footer-tagline">
-                AI-powered FX prediction markets on Arc Network.<br/>
-                Predict African currency rates, earn USDC.
-              </p>
-            </div>
-            <div className="footer-col">
-              <div className="footer-col-title">Explore</div>
-              <a href="https://testnet.arcscan.app/address/0x5Ddf555F6d360203d02Fe1D9be49b13981A732b5" target="_blank" rel="noreferrer" className="footer-link">
-                <span className="footer-link-icon">📄</span> Smart Contract
-              </a>
-              <a href="https://testnet.arcscan.app" target="_blank" rel="noreferrer" className="footer-link">
-                <span className="footer-link-icon">🔍</span> Arc Explorer
-              </a>
-            </div>
-            <div className="footer-col">
-              <div className="footer-col-title">Deployed Contract</div>
-              <a href="https://testnet.arcscan.app/address/0x5Ddf555F6d360203d02Fe1D9be49b13981A732b5" target="_blank" rel="noreferrer" style={{textDecoration:"none"}}>
-                <div className="footer-contract-badge">
-                  <LiveDot color="var(--green)"/>
-                  <div>
-                    <div className="footer-contract-network">Arc Testnet</div>
-                    <div className="footer-contract-addr">0x5Ddf555F6d…732B5</div>
-                  </div>
-                </div>
-              </a>
-            </div>
-          </div>
-          <div className="footer-bottom">
-            <span className="footer-copy">© 2026 AgoraFX · Built on Arc Network for Agora Agent Hackathon</span>
-            <div className="footer-powered">
+      <footer style={{
+        marginTop:48, borderTop:"1px solid var(--border-subtle)",
+        padding:"20px 16px",
+      }}>
+        <div style={{
+          maxWidth:900, margin:"0 auto",
+          display:"flex", alignItems:"center", justifyContent:"space-between",
+          flexWrap:"wrap", gap:12,
+        }}>
+          <span style={{ fontSize:11, color:"var(--text-dim)" }}>
+            © 2026 AgoraFX · Arc Testnet · USDC
+          </span>
+          <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+            <a href="https://testnet.arcscan.app/address/0x833C71c1c261857538CEB8877aaFc80A47E66130"
+              target="_blank" rel="noreferrer"
+              style={{ fontSize:11, color:"var(--text-dim)", textDecoration:"none" }}>
+              Contract ↗
+            </a>
+            <a href="https://testnet.arcscan.app/address/0x5Ddf555F6d360203d02Fe1D9be49b13981A732b5"
+              target="_blank" rel="noreferrer"
+              style={{ fontSize:11, color:"var(--text-dim)", textDecoration:"none" }}>
+              Legacy V1 ↗
+            </a>
+            <a href="https://testnet.arcscan.app" target="_blank" rel="noreferrer"
+              style={{ fontSize:11, color:"var(--text-dim)", textDecoration:"none" }}>
+              Explorer ↗
+            </a>
+            <div style={{ display:"flex", alignItems:"center", gap:5 }}>
               <LiveDot color="var(--green)"/>
-              <span>Arc Testnet · USDC · Powered by AI Agent</span>
+              <span style={{ fontSize:11, color:"var(--text-dim)" }}>Live</span>
             </div>
           </div>
         </div>

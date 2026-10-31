@@ -135,13 +135,13 @@ def get_latest_rates():
     return result
 
 @app.get("/rates/signal")
-async def get_signal(payer: str = Depends(require_x402)):
+async def get_signal(request: Request, payer: str = Depends(require_x402)):
     """
     x402 paywalled — $0.001 USDC per call.
     Depends(require_x402) enforces EIP-712 payment before this runs.
     payer = verified signer address recovered from EIP-712 signature.
     """
-    import httpx, hashlib, time as _time
+    import hashlib
 
     conn = get_conn()
 
@@ -193,36 +193,13 @@ async def get_signal(payer: str = Depends(require_x402)):
         "x402_version": 1,
     }
 
-    # ── Facilitator settlement ────────────────────────────────────────────────
-    # Submit the signed EIP-712 authorization to Circle's x402 facilitator
-    facilitator_url = os.getenv(
-        "X402_FACILITATOR_URL",
-        "https://x402.org/facilitate"
-    )
-    settled = False
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                facilitator_url,
-                json={
-                    "x402Version": 1,
-                    "paymentPayload": payload.get("_payment_payload"),  # injected by middleware below
-                },
-            )
-            if resp.status_code == 200:
-                settled = True
-                log.info("x402 facilitator settled: payer=%s", payer)
-            else:
-                log.warning("x402 facilitator %s: %s", resp.status_code, resp.text[:200])
-    except Exception as e:
-        log.warning("x402 facilitator call failed: %s", e)
-
     # ── Response ──────────────────────────────────────────────────────────────
     price_units = int(float(os.getenv("X402_SIGNAL_PRICE_USDC", "0.001")) * 1_000_000)
     settle_hdr  = base64.b64encode(json.dumps(
         {
-            "success": settled,
+            "success": True,
             "payer":   payer,
+            "transaction": getattr(request.state, "x402_tx", ""),
             "amount":  str(price_units),
             "network": "eip155:5042002",
         },
@@ -460,7 +437,7 @@ def resume_agent():
     subprocess.run(["sudo","systemctl","start","agorafx"], capture_output=True)
     return {"ok": True}
 
-@app.get("/agent/logs")
+@app.get("/agent/logs", dependencies=[Depends(require_admin)])
 def get_agent_logs():
     import subprocess
     result = subprocess.run(
@@ -797,7 +774,7 @@ def get_market_bets(market_id_hex: str):
     finally:
         db.close()
 
-@app.get("/admin/stuck-markets")
+@app.get("/admin/stuck-markets", dependencies=[Depends(require_admin)])
 def get_stuck_markets():
     """Markets expired on-chain but not resolved in DB."""
     import time

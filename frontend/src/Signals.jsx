@@ -1,5 +1,5 @@
 /**
- * AgoraFX — Signals Tab (Phase 4 / RFB-06)
+ * AgoraFX — Signals Tab (v2-Phase 4 / RFB-06)
  *
  * African analysts publish FX articles.
  * Readers pay $0.05 USDC via x402 (EIP-712, Arc Testnet).
@@ -18,7 +18,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ethers } from "ethers";
 
-const API              = "https://api.kudiarc.xyz";
+const API = import.meta.env.VITE_API_URL || "https://api.kudiarc.xyz";
 const ARTICLE_PRICE    = 0.05;
 const ANALYST_SHARE    = 0.04;
 const USDC_ADDRESS     = "0x3600000000000000000000000000000000000000";
@@ -94,6 +94,27 @@ async function signAndPay(wallet_account, article_id) {
   return await resp.json();
 }
 
+// ── Wallet session: one signature, reused for ~24h ───────────────────────────
+const AUTH_KEY = "agorafx_wallet_auth";
+
+async function getWalletAuth(account) {
+  const wallet = account.toLowerCase();
+  try {
+    const cached = JSON.parse(localStorage.getItem(AUTH_KEY) || "null");
+    if (cached && cached.wallet === wallet && cached.expires > Math.floor(Date.now() / 1000) + 300) {
+      return cached.token;
+    }
+  } catch { /* storage unavailable */ }
+
+  const provider  = new ethers.BrowserProvider(window.ethereum);
+  const signer    = await provider.getSigner();
+  const expires   = Math.floor(Date.now() / 1000) + 85800;
+  const signature = await signer.signMessage(`AgoraFX wallet session\nwallet:${wallet}\nexpires:${expires}`);
+  const token     = btoa(JSON.stringify({ wallet, expires, signature }));
+  try { localStorage.setItem(AUTH_KEY, JSON.stringify({ wallet, expires, token })); } catch { /* ignore */ }
+  return token;
+}
+
 // ── ArticleReader (full-screen overlay) ──────────────────────────────────────
 function ArticleReader({ article, wallet, onClose }) {
   const [state,   setState]   = useState("checking"); // checking|unpaid|signing|loading|done|error
@@ -111,7 +132,10 @@ function ArticleReader({ article, wallet, onClose }) {
       return;
     }
 
-    fetch(`${API}/intelligence/${article.id}/read?reader=${wallet.account}`)
+    getWalletAuth(wallet.account)
+      .then(auth => fetch(`${API}/intelligence/${article.id}/read?reader=${wallet.account}`, {
+        headers: { "X-Wallet-Auth": auth },
+      }))
       .then(r => r.json())
       .then(res => {
         if (res.paid) {
@@ -407,9 +431,10 @@ function PublishForm({ wallet, onPublished, onClose }) {
     if (!title.trim() || !content.trim()) { setErr("Title and content are required."); return; }
     setStep("submitting"); setErr("");
     try {
+      const auth = await getWalletAuth(wallet.account);
       const resp = await fetch(`${API}/intelligence`, {
         method:"POST",
-        headers:{ "Content-Type":"application/json" },
+        headers:{ "Content-Type":"application/json", "X-Wallet-Auth": auth },
         body: JSON.stringify({
           title: title.trim(),
           author_wallet: wallet.account,
@@ -633,28 +658,34 @@ export default function Signals({ wallet }) {
       )}
 
       {/* ── Feed ── */}
-      <StatsBar stats={stats} />
 
-      {stats?.top_authors?.length > 0 && (
-        <TopAnalysts authors={stats.top_authors} />
-      )}
-
-      {/* Publish CTA */}
-      <button
-        onClick={() => setShowPublish(true)}
-        style={{
-          width:"100%", padding:"13px 0", marginBottom:20,
-          background:"rgba(240,160,48,0.06)",
-          border:"1px dashed rgba(240,160,48,0.3)",
-          color:"var(--amber)", borderRadius:12,
-          fontFamily:"Outfit, sans-serif", fontWeight:700, fontSize:13,
-          cursor:"pointer", transition:"background 0.15s",
-        }}
-        onMouseEnter={e => e.currentTarget.style.background="rgba(240,160,48,0.1)"}
-        onMouseLeave={e => e.currentTarget.style.background="rgba(240,160,48,0.06)"}
-      >
-        + Publish FX Signal
-      </button>
+      {/* Section header: title + publish button */}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
+        <div>
+          <div style={{ fontSize:11, color:"var(--text-dim)", letterSpacing:"1.8px", textTransform:"uppercase", marginBottom:3 }}>
+            FX Intelligence
+          </div>
+          <div style={{ fontSize:13, color:"var(--text-secondary)", fontWeight:500 }}>
+            {stats ? `${stats.article_count} signal${stats.article_count !== 1 ? "s" : ""} · $${Number(stats.total_earned).toFixed(4)} earned` : ""}
+          </div>
+        </div>
+        <button
+          onClick={() => setShowPublish(true)}
+          style={{
+            background:"rgba(240,160,48,0.1)",
+            border:"1px solid rgba(240,160,48,0.35)",
+            color:"var(--amber)", borderRadius:8,
+            padding:"8px 14px",
+            fontFamily:"Outfit, sans-serif", fontWeight:700, fontSize:12,
+            cursor:"pointer", whiteSpace:"nowrap",
+            transition:"background 0.15s",
+          }}
+          onMouseEnter={e => e.currentTarget.style.background="rgba(240,160,48,0.18)"}
+          onMouseLeave={e => e.currentTarget.style.background="rgba(240,160,48,0.1)"}
+        >
+          + Publish
+        </button>
+      </div>
 
       {/* Pair filter */}
       <div style={{ display:"flex", gap:6, marginBottom:16, flexWrap:"wrap" }}>
@@ -680,7 +711,7 @@ export default function Signals({ wallet }) {
         </div>
       ) : articles.length === 0 ? (
         <div style={{ textAlign:"center", padding:"60px 0" }}>
-          <div style={{ fontSize:32, marginBottom:12 }}>📡</div>
+          <div style={{ fontSize:32, marginBottom:12 }}>◎</div>
           <div style={{ fontSize:15, fontWeight:600, color:"var(--text-muted)", marginBottom:6 }}>
             No signals yet
           </div>
@@ -698,7 +729,25 @@ export default function Signals({ wallet }) {
         ))
       )}
 
-      <div style={{ textAlign:"center", marginTop:20, fontSize:10, color:"var(--text-dim)" }}>
+      {/* Stats summary — below articles, above leaderboard */}
+      <StatsBar stats={stats} />
+
+      {/* Top Analysts — secondary info, belongs at the bottom */}
+      {stats?.top_authors?.length > 0 && (
+        <div style={{ marginTop:28 }}>
+          <div style={{
+            fontSize:9, color:"var(--text-dim)", letterSpacing:"2px",
+            textTransform:"uppercase", marginBottom:10,
+            display:"flex", alignItems:"center", gap:10,
+          }}>
+            Top Analysts
+            <span style={{ flex:1, height:1, background:"var(--border)", display:"inline-block" }}/>
+          </div>
+          <TopAnalysts authors={stats.top_authors} />
+        </div>
+      )}
+
+      <div style={{ textAlign:"center", marginTop:16, fontSize:10, color:"var(--text-dim)" }}>
         Payments settled on Arc Testnet · USDC ·{" "}
         <a href="https://testnet.arcscan.app" target="_blank" rel="noreferrer"
           style={{ color:"var(--text-dim)", textDecoration:"none" }}>
@@ -708,3 +757,4 @@ export default function Signals({ wallet }) {
     </div>
   );
 }
+

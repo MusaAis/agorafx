@@ -36,3 +36,4 @@ export function shareMarket(market) {
   const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
   window.open(tweetUrl, "_blank", "width=550,height=450");
 }
+
