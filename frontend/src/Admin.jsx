@@ -17,8 +17,6 @@ const ARC_CHAIN    = {
 const MARKET_ABI = [
   "function accumulatedFees() view returns (uint256)",
   "function withdrawFees() external",
-  "function setBlacklist(address wallet, bool blocked) external",
-  "function isBlacklisted(address wallet) view returns (bool)",
 ];
 
 const ago=(ts)=>{const s=Math.floor((Date.now()-new Date(ts+"Z").getTime())/1000);if(s<60)return`${s}s ago`;if(s<3600)return`${Math.floor(s/60)}m ago`;if(s<86400)return`${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m ago`;return new Date(ts+"Z").toLocaleDateString("en-US",{month:"short",day:"numeric"});};
@@ -291,7 +289,6 @@ function StuckMarkets({toast}){
 function AgentControls({toast}){
   const [status,setStatus]=useState(null);
   const [loadingS,setLoadingS]=useState(false);
-  const [scanning,setScanning]=useState(false);
   const [toggling,setToggling]=useState(false);
   const [logs,setLogs]=useState([]);
 
@@ -301,7 +298,6 @@ function AgentControls({toast}){
   useEffect(()=>{fetchStatus();fetchLogs();},[fetchStatus,fetchLogs]);
 
   const toggle=async()=>{if(!status)return;setToggling(true);try{await adminFetch(status.running?`${API}/agent/pause`:`${API}/agent/resume`,{method:"POST"});await fetchStatus();toast.push(status.running?"Agent paused":"Agent resumed");}catch{toast.push("Failed","error");}finally{setToggling(false);}};
-  const triggerScan=async()=>{setScanning(true);try{await fetch(`${API}/agent/scan`,{method:"POST"});toast.push("Scan triggered");setTimeout(()=>{fetchStatus();fetchLogs();},2000);}catch{toast.push("Scan failed","error");}finally{setTimeout(()=>setScanning(false),2000);}};
 
   const isRunning=status?.running;
   return(
@@ -319,9 +315,6 @@ function AgentControls({toast}){
             </div>
           </div>
           <div style={{display:"flex",gap:10}}>
-            <button onClick={triggerScan} disabled={scanning} style={{background:"#1a1a1a",border:"1px solid #2a2a2a",color:scanning?"#555":"#e8ff87",borderRadius:10,padding:"10px 18px",fontSize:12,cursor:scanning?"default":"pointer",fontFamily:"'Syne',sans-serif",fontWeight:700,display:"flex",alignItems:"center",gap:8}}>
-              {scanning?<><Spinner/>Scanning…</>:"▶ Trigger Scan"}
-            </button>
             <button onClick={toggle} disabled={toggling||loadingS} style={{background:isRunning?"#ff475718":"#00ff8718",border:`1px solid ${isRunning?"#ff475744":"#00ff8744"}`,color:isRunning?"#ff4757":"#00ff87",borderRadius:10,padding:"10px 18px",fontSize:12,cursor:toggling?"default":"pointer",fontFamily:"'Syne',sans-serif",fontWeight:700,display:"flex",alignItems:"center",gap:8}}>
               {toggling?<><Spinner/>…</>:isRunning?"⏸ Pause":"▶ Resume"}
             </button>
@@ -464,45 +457,38 @@ function BetsTracker({markets,toast}){
 // ══════════════════════════════════════════════════════════════════
 // TAB: ANALYTICS
 // ══════════════════════════════════════════════════════════════════
-function Analytics({markets,decisions}){
+function Analytics(){
   const [chainStats,setChainStats]=useState({});
-  useEffect(()=>{fetch(`${API}/stats/chain/v5`).then(x=>x.json()).catch(()=>null).then(d=>{if(d&&!d.error)setChainStats(d);});},[]);
+  const [A,setA]=useState(null);
+  useEffect(()=>{
+    fetch(`${API}/stats/chain/v5`).then(x=>x.json()).catch(()=>null).then(d=>{if(d&&!d.error)setChainStats(d);});
+    fetch(`${API}/stats/analytics`).then(x=>x.json()).catch(()=>null).then(d=>{if(d)setA(d);});
+  },[]);
+  if(!A)return <div style={{color:"#444",fontSize:12,padding:"32px 0",textAlign:"center"}}>Loading…</div>;
 
-  const yesWins=markets.filter(m=>m.resolved&&m.outcome==="YES").length;
-  const noWins=markets.filter(m=>m.resolved&&m.outcome==="NO").length;
-  const voided=markets.filter(m=>m.resolved&&m.outcome==="VOID").length;
+  const yesWins=A.yes_wins,noWins=A.no_wins,voided=A.void;
   const pieData=[{name:"YES Wins",value:yesWins,color:"#00ff87"},{name:"NO Wins",value:noWins,color:"#ff4757"},{name:"Void",value:voided,color:"#333"}].filter(d=>d.value>0);
-
-  const byDay={};
-  markets.forEach(m=>{const day=m.created_at?.slice(0,10);if(day)byDay[day]=(byDay[day]||0)+1;});
-  const volumeData=Object.entries(byDay).sort((a,b)=>a[0]>b[0]?1:-1).slice(-14).map(([day,count])=>({day:day.slice(5),count}));
-
-  const byPair={};
-  markets.forEach(m=>{byPair[m.pair]=(byPair[m.pair]||0)+1;});
-  const pairData=Object.entries(byPair).sort((a,b)=>b[1]-a[1]).map(([pair,count])=>({pair:pair.replace("USDC/",""),count}));
-
-  const decByDay={};
-  decisions.forEach(d=>{const day=d.created_at?.slice(0,10);if(day)decByDay[day]=(decByDay[day]||0)+1;});
-  const decData=Object.entries(decByDay).sort((a,b)=>a[0]>b[0]?1:-1).slice(-14).map(([day,count])=>({day:day.slice(5),count}));
-
-  const created=decisions.filter(d=>d.action==="create_market").length;
-  const holds=decisions.filter(d=>d.action!=="create_market").length;
+  const volumeData=A.markets_by_day.map(r=>({day:r.day.slice(5),count:r.count}));
+  const pairData=A.markets_by_pair.map(r=>({pair:r.pair.replace("USDC/",""),count:r.count}));
+  const decData=A.decisions_by_day.map(r=>({day:r.day.slice(5),count:r.count}));
+  const created=A.created;
+  const holds=A.decisions-A.created;
   const decPie=[{name:"Market Created",value:created,color:"#e8ff87"},{name:"Hold",value:holds,color:"#2a2a2a"}].filter(d=>d.value>0);
-
-  const total=markets.length;
-  const resolved=markets.filter(m=>m.resolved).length;
+  const decisions={length:A.decisions};
+  const total=A.markets;
+  const resolved=A.resolved;
   const resRate=total>0?((resolved/total)*100).toFixed(0):0;
   const tooltipStyle={contentStyle:{background:"#0e0e0e",border:"1px solid #1e1e1e",borderRadius:8,fontSize:11},labelStyle:{color:"#555"},itemStyle:{color:"#e8ff87"}};
 
   return(
     <div className="fade">
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}}>
-        {[["Total TVL",chainStats.tvl!=null?`$${Number(chainStats.tvl).toLocaleString(undefined,{maximumFractionDigits:2})}`:"…","#e8ff87"],["Total Txns",chainStats.txns!=null?chainStats.txns:"…","#87d4ff"],["Unique Wallets",chainStats.unique_wallets!=null?chainStats.unique_wallets:"…","#e8ff87"],["YES Bets",chainStats.yes_bets!=null?chainStats.yes_bets:"…","#00ff87",chainStats.yes_volume_usdc!=null?`$${chainStats.yes_volume_usdc}`:null],["NO Bets",chainStats.no_bets!=null?chainStats.no_bets:"…","#ff4757",chainStats.no_volume_usdc!=null?`$${chainStats.no_volume_usdc}`:null],["Total Bets",chainStats.yes_bets!=null&&chainStats.no_bets!=null?chainStats.yes_bets+chainStats.no_bets:"…","#fff"]].map(([lbl,val,accent,sub])=>(
+        {[["Total TVL",chainStats.tvl_usdc!=null?`$${Number(chainStats.tvl_usdc).toLocaleString(undefined,{maximumFractionDigits:2})}`:"…","#e8ff87"],["Total Txns",chainStats.total_txns!=null?chainStats.total_txns:"…","#87d4ff"],["Unique Wallets",chainStats.unique_wallets!=null?chainStats.unique_wallets:"…","#e8ff87"],["YES Bets",chainStats.yes_bets!=null?chainStats.yes_bets:"…","#00ff87",chainStats.yes_volume_usdc!=null?`$${chainStats.yes_volume_usdc}`:null],["NO Bets",chainStats.no_bets!=null?chainStats.no_bets:"…","#ff4757",chainStats.no_volume_usdc!=null?`$${chainStats.no_volume_usdc}`:null],["Total Bets",chainStats.yes_bets!=null&&chainStats.no_bets!=null?chainStats.yes_bets+chainStats.no_bets:"…","#fff"]].map(([lbl,val,accent,sub])=>(
           <StatBox key={lbl} label={lbl} value={val} accent={accent} sub={sub}/>
         ))}
       </div>
       <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap"}}>
-        {[["Total Markets",total,"#fff"],["Resolution Rate",`${resRate}%`,"#87d4ff"],["YES Win Rate",yesWins+noWins>0?`${((yesWins/(yesWins+noWins))*100).toFixed(0)}%`:"—","#00ff87"],["Decisions",decisions.length,"#e8ff87"],["Create Rate",created>0?`${((created/decisions.length)*100).toFixed(0)}%`:"—","#ccc"]].map(([lbl,val,accent])=>(
+        {[["Total Markets",total,"#fff"],["Resolution Rate",`${resRate}%`,"#87d4ff"],["YES Win Rate",yesWins+noWins>0?`${((yesWins/(yesWins+noWins))*100).toFixed(0)}%`:"—","#00ff87"],["Decisions",A.decisions,"#e8ff87"],["Create Rate",created>0?`${((created/decisions.length)*100).toFixed(0)}%`:"—","#ccc"]].map(([lbl,val,accent])=>(
           <StatBox key={lbl} label={lbl} value={val} accent={accent}/>
         ))}
       </div>
@@ -541,91 +527,6 @@ function Analytics({markets,decisions}){
           <ResponsiveContainer width="100%" height={140}><LineChart data={decData} margin={{top:4,right:4,bottom:0,left:-20}}><XAxis dataKey="day" tick={{fill:"#333",fontSize:9}} axisLine={false} tickLine={false}/><YAxis tick={{fill:"#333",fontSize:9}} axisLine={false} tickLine={false} allowDecimals={false}/><Tooltip {...tooltipStyle}/><Line type="monotone" dataKey="count" stroke="#87d4ff" dot={false} strokeWidth={1.5}/></LineChart></ResponsiveContainer>
         )}
       </ChartCard>
-    </div>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════
-// TAB: BLACKLIST
-// ══════════════════════════════════════════════════════════════════
-function BlacklistManager({toast}){
-  const [list,setList]=useState([]);
-  const [loading,setLoading]=useState(false);
-  const [newAddr,setNewAddr]=useState("");
-  const [newReason,setNewReason]=useState("");
-  const [adding,setAdding]=useState(false);
-  const [mode,setMode]=useState("blacklist");
-  const [search,setSearch]=useState("");
-
-  const fetchList=useCallback(async()=>{setLoading(true);try{const data=await fetch(`${API}/admin/blacklist`).then(x=>x.json());setList(Array.isArray(data)?data:[]);}catch{setList([]);}finally{setLoading(false);};},[]);
-  useEffect(()=>{fetchList();},[fetchList]);
-
-  const isValidAddr=(a)=>/^0x[0-9a-fA-F]{40}$/.test(a);
-
-  const addAddress=async()=>{
-    if(!isValidAddr(newAddr)){toast.push("Invalid address","error");return;}
-    setAdding(true);
-    try{await fetch(`${API}/admin/blacklist`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({address:newAddr.toLowerCase(),blocked:mode==="blacklist",reason:newReason})});toast.push(`Address ${mode==="blacklist"?"blacklisted":"whitelisted"}`);setNewAddr("");setNewReason("");await fetchList();}
-    catch{toast.push("Failed","error");}
-    finally{setAdding(false);}
-  };
-
-  const removeAddress=async(address)=>{
-    try{await fetch(`${API}/admin/blacklist/${address}`,{method:"DELETE"});toast.push("Removed");setList(l=>l.filter(x=>x.address!==address));}
-    catch{toast.push("Failed","error");}
-  };
-
-  const filtered=list.filter(item=>{
-    if(mode==="blacklist"&&!item.blocked)return false;
-    if(mode==="whitelist"&&item.blocked)return false;
-    if(search&&!item.address.toLowerCase().includes(search.toLowerCase()))return false;
-    return true;
-  });
-
-  return(
-    <div className="fade">
-      <div style={{display:"flex",gap:0,marginBottom:20,background:"#0e0e0e",borderRadius:11,border:"1px solid #1a1a1a",padding:3,width:"fit-content"}}>
-        {["blacklist","whitelist"].map(m=>(
-          <button key={m} onClick={()=>setMode(m)} style={{background:mode===m?(m==="blacklist"?"#ff475722":"#00ff8722"):"none",border:mode===m?`1px solid ${m==="blacklist"?"#ff475744":"#00ff8744"}`:"1px solid transparent",color:mode===m?(m==="blacklist"?"#ff4757":"#00ff87"):"#444",borderRadius:8,padding:"7px 18px",fontSize:12,fontFamily:"'Syne',sans-serif",fontWeight:700,cursor:"pointer",textTransform:"capitalize",transition:"all .18s"}}>
-            {m==="blacklist"?"⛔ Blacklist":"✅ Whitelist"}
-          </button>
-        ))}
-      </div>
-      <div style={{background:"#0e0e0e",border:"1px solid #161616",borderRadius:16,padding:20,marginBottom:16}}>
-        <div style={{fontSize:12,fontWeight:700,color:"#888",marginBottom:14}}>{mode==="blacklist"?"⛔ Block wallet":"✅ Whitelist wallet"}</div>
-        <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-          <input placeholder="0x… address" value={newAddr} onChange={e=>setNewAddr(e.target.value)} style={{flex:2,minWidth:220,background:"#080808",border:`1px solid ${newAddr&&!isValidAddr(newAddr)?"#ff475755":"#1a1a1a"}`,borderRadius:10,padding:"10px 14px",color:"#ccc",fontSize:12,fontFamily:"'DM Mono',monospace",outline:"none"}}/>
-          <input placeholder="Reason (optional)" value={newReason} onChange={e=>setNewReason(e.target.value)} style={{flex:1,minWidth:140,background:"#080808",border:"1px solid #1a1a1a",borderRadius:10,padding:"10px 14px",color:"#ccc",fontSize:12,fontFamily:"'Syne',sans-serif",outline:"none"}}/>
-          <button onClick={addAddress} disabled={adding||!newAddr} style={{background:mode==="blacklist"?"#ff475718":"#00ff8718",border:`1px solid ${mode==="blacklist"?"#ff475744":"#00ff8744"}`,color:mode==="blacklist"?"#ff4757":"#00ff87",borderRadius:10,padding:"10px 20px",fontSize:12,fontFamily:"'Syne',sans-serif",fontWeight:700,cursor:adding||!newAddr?"default":"pointer",opacity:adding||!newAddr?0.5:1,display:"flex",alignItems:"center",gap:8}}>
-            {adding?<><Spinner/>Adding…</>:mode==="blacklist"?"Block":"Allow"}
-          </button>
-        </div>
-        {newAddr&&!isValidAddr(newAddr)&&<div style={{fontSize:11,color:"#ff4757",marginTop:6}}>Invalid Ethereum address</div>}
-      </div>
-      <div style={{display:"flex",gap:10,marginBottom:12,alignItems:"center"}}>
-        <input placeholder="Search…" value={search} onChange={e=>setSearch(e.target.value)} style={{flex:1,background:"#111",border:"1px solid #1a1a1a",borderRadius:9,padding:"8px 14px",color:"#ccc",fontSize:12,fontFamily:"'DM Mono',monospace",outline:"none"}}/>
-        <span style={{fontSize:11,color:"#3a3a3a"}}>{filtered.length} addresses</span>
-        <button onClick={fetchList} style={{background:"none",border:"1px solid #1a1a1a",color:"#444",borderRadius:7,padding:"6px 12px",fontSize:10,cursor:"pointer"}}>{loading?<Spinner/>:"↻"}</button>
-      </div>
-      {filtered.length===0?(
-        <div style={{textAlign:"center",color:"#2a2a2a",fontSize:13,padding:"40px 0"}}>{loading?"Loading…":`No ${mode}ed addresses`}</div>
-      ):filtered.map((item,i)=>(
-        <div key={i} style={{background:"#0e0e0e",border:"1px solid #161616",borderRadius:12,padding:"12px 16px",marginBottom:7,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-          <div style={{flex:1}}>
-            <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:3}}>
-              <Badge label={item.blocked?"Blocked":"Allowed"} color={item.blocked?"#ff4757":"#00ff87"}/>
-              <span style={{fontFamily:"'DM Mono',monospace",fontSize:12,color:"#888"}}>{item.address}</span>
-              <a href={`https://testnet.arcscan.app/address/${item.address}`} target="_blank" rel="noreferrer" style={{fontSize:10,color:"#2a2a2a",textDecoration:"none"}}>↗</a>
-            </div>
-            {item.reason&&<div style={{fontSize:11,color:"#3a3a3a"}}>{item.reason}{item.added_at&&<span style={{marginLeft:8,color:"#2a2a2a"}}>· {ago(item.added_at)}</span>}</div>}
-          </div>
-          <button onClick={()=>removeAddress(item.address)} style={{background:"#1a1a1a",border:"1px solid #2a2a2a",color:"#555",borderRadius:8,padding:"6px 12px",fontSize:10,cursor:"pointer",fontFamily:"'Syne',sans-serif"}}
-            onMouseEnter={e=>{e.currentTarget.style.color="#ff4757";e.currentTarget.style.borderColor="#ff475744";}}
-            onMouseLeave={e=>{e.currentTarget.style.color="#555";e.currentTarget.style.borderColor="#2a2a2a";}}>
-            Remove
-          </button>
-        </div>
-      ))}
     </div>
   );
 }
@@ -724,7 +625,7 @@ export default function Admin(){
     </div>
   );
 
-  const TABS=[["overview","Overview"],["stuck","🔧 Stuck Markets"],["agent","⚡ Agent"],["bets","🎯 Positions"],["analytics","📊 Analytics"],["blacklist","🚫 Blacklist"],["markets","Markets"],["decisions","Decisions"],["rates","Rates"],["pairs","+ Pairs"]];
+  const TABS=[["overview","Overview"],["stuck","🔧 Stuck Markets"],["agent","⚡ Agent"],["bets","🎯 Positions"],["analytics","📊 Analytics"],["markets","Markets"],["decisions","Decisions"],["rates","Rates"],["pairs","+ Pairs"]];
 
   const stuckCount=markets.filter(m=>!m.resolved&&m.expiry_ts<=Math.floor(Date.now()/1000)).length;
 
@@ -783,8 +684,7 @@ export default function Admin(){
         {tab==="stuck"&&<StuckMarkets toast={toast}/>}
         {tab==="agent"&&<AgentControls toast={toast}/>}
         {tab==="bets"&&<BetsTracker markets={markets} toast={toast}/>}
-        {tab==="analytics"&&<Analytics markets={markets} decisions={decisions}/>}
-        {tab==="blacklist"&&<BlacklistManager toast={toast}/>}
+        {tab==="analytics"&&<Analytics/>}
 
         {tab==="markets"&&(
           <div className="fade">

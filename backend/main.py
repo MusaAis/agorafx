@@ -277,6 +277,26 @@ def get_stats():
         "rates": rates,
     }
 
+@app.get("/stats/analytics")
+def get_analytics():
+    conn = get_conn()
+    one = lambda q: conn.execute(q).fetchone()[0]
+    daily_m = conn.execute("SELECT substr(created_at,1,10) d, COUNT(*) c FROM markets GROUP BY d ORDER BY d DESC LIMIT 14").fetchall()
+    daily_d = conn.execute("SELECT substr(created_at,1,10) d, COUNT(*) c FROM decisions GROUP BY d ORDER BY d DESC LIMIT 14").fetchall()
+    pairs   = conn.execute("SELECT pair, COUNT(*) c FROM markets GROUP BY pair ORDER BY c DESC").fetchall()
+    return {
+        "markets":   one("SELECT COUNT(*) FROM markets"),
+        "resolved":  one("SELECT COUNT(*) FROM markets WHERE resolved=1"),
+        "yes_wins":  one("SELECT COUNT(*) FROM markets WHERE resolved=1 AND outcome='YES'"),
+        "no_wins":   one("SELECT COUNT(*) FROM markets WHERE resolved=1 AND outcome='NO'"),
+        "void":      one("SELECT COUNT(*) FROM markets WHERE resolved=1 AND outcome='VOID'"),
+        "decisions": one("SELECT COUNT(*) FROM decisions"),
+        "created":   one("SELECT COUNT(*) FROM decisions WHERE action='create_market'"),
+        "markets_by_day":   [{"day": r[0], "count": r[1]} for r in reversed(daily_m)],
+        "decisions_by_day": [{"day": r[0], "count": r[1]} for r in reversed(daily_d)],
+        "markets_by_pair":  [{"pair": r[0], "count": r[1]} for r in pairs],
+    }
+
 @app.get("/stats/performance")
 def get_performance():
     conn = get_conn()
