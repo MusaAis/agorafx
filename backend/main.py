@@ -518,7 +518,7 @@ def get_user_positions(address: str):
     from web3.middleware import ExtraDataToPOAMiddleware
     import sqlite3 as _sqlite3
 
-    db = _sqlite3.connect(DB_PATH)
+    db = _sqlite3.connect(DB_PATH, timeout=30)
     db.row_factory = _sqlite3.Row
     _ensure_user_bets_table(db)
 
@@ -779,7 +779,7 @@ def get_bets_summary():
 def get_market_bets(market_id_hex: str):
     """Return all bets for a specific market from user_bets cache."""
     import sqlite3 as _sqlite3
-    db = _sqlite3.connect(DB_PATH)
+    db = _sqlite3.connect(DB_PATH, timeout=30)
     db.row_factory = _sqlite3.Row
     try:
         rows = db.execute(
